@@ -317,6 +317,19 @@ async fn replay_snapshot_to_isolated_db_without_skipping() {
         .unwrap()
         .get(0);
     assert_eq!(highest, blocks);
+    let movements = client.query("SELECT s.type,s.amount,h.amount,t.amount FROM state_transitions s JOIN shielded_transitions h ON h.state_transition_id=s.id JOIN transfers t ON t.state_transition_hash=s.hash WHERE s.type IN (21,22) AND s.status='SUCCESS'", &[]).await.unwrap();
+    for movement in movements {
+        let kind: i32 = movement.get(0);
+        let transaction_amount: i64 = movement.get(1);
+        let pool_amount: i64 = movement.get(2);
+        let identity_amount: i64 = movement.get(3);
+        assert_eq!(transaction_amount, pool_amount, "identity and pool projections must count a single movement only once");
+        if kind == 21 {
+            assert_eq!(identity_amount, pool_amount);
+        } else {
+            assert!(identity_amount >= 0 && identity_amount < pool_amount, "top-up identity credit must exclude the official pool-paid fee");
+        }
+    }
     println!("REPLAY VERIFIED: {blocks} contiguous blocks, {transactions} exact transactions, zero skips; database retained");
 }
 
