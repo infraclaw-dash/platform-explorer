@@ -119,12 +119,12 @@ async fn decode_snapshot_without_skipping() {
 async fn replay_snapshot_to_isolated_db_without_skipping() {
     assert_eq!(
         std::env::var("POSTGRES_HOST").unwrap(),
-        "pe-sakura-replay-db"
+        "pe-sakura-projections-db-fe890e"
     );
-    assert_eq!(std::env::var("POSTGRES_DB").unwrap(), "pe_sakura_replay");
+    assert_eq!(std::env::var("POSTGRES_DB").unwrap(), "pe_sakura_projections_fe890e");
     assert_eq!(
         std::env::var("PE_REPLAY_CORE_URL").unwrap(),
-        "http://pe-sakura-replay-core:8000"
+        "http://pe-sakura-projections-core-fe890e:8000"
     );
     let dao = PostgresDAO::new(Network::Testnet);
     let mut client = dao.connection_pool.get().await.unwrap();
@@ -247,6 +247,15 @@ async fn replay_snapshot_to_isolated_db_without_skipping() {
                     .handle_block(block, validators)
                     .await
                     .unwrap_or_else(|e| panic!("replay failed at block {blocks}: {e:?}"));
+                if blocks == 703 {
+                    // A moderator deletion must retain original ownership/content,
+                    // append a tombstone, and link it to the exact actual ST.
+                    let row=client.query_one("SELECT removed.owner,deleted.owner,removed.data,deleted.data,deleted.deleted,deleted.state_transition_hash FROM contract_moderation_document_removals r JOIN documents removed ON removed.id=r.removed_document_row_id JOIN documents deleted ON deleted.state_transition_hash=r.deleted_by_transition WHERE r.deleted_by_transition='515D22E4A0F26BB5F6B76345E3F2AD84B59899E50F40FFA89BD9936E6410071C'",&[]).await.unwrap();
+                    assert_eq!(row.get::<_,String>(0),row.get::<_,String>(1));
+                    assert_eq!(row.get::<_,Option<serde_json::Value>>(2),row.get::<_,Option<serde_json::Value>>(3));
+                    assert!(row.get::<_,bool>(4));
+                    assert_eq!(row.get::<_,String>(5).trim(),"515D22E4A0F26BB5F6B76345E3F2AD84B59899E50F40FFA89BD9936E6410071C");
+                }
                 let persisted = client
                     .query(
                         "SELECT data FROM state_transitions WHERE block_height = $1 ORDER BY index",
@@ -293,21 +302,21 @@ async fn replay_snapshot_to_isolated_db_without_skipping() {
 }
 
 #[tokio::test]
-#[ignore = "requires retained disposable replay DB at block 702 and captured block 703"]
-async fn unsupported_real_moderation_block_does_not_commit_or_lose_retained_data() {
+#[ignore = "requires retained disposable replay DB at block 708 and captured block 709"]
+async fn unsupported_team_proposal_does_not_commit_or_lose_retained_data() {
     assert_eq!(
         std::env::var("POSTGRES_HOST").unwrap(),
-        "pe-sakura-replay-db"
+        "pe-sakura-projections-db-fe890e"
     );
-    assert_eq!(std::env::var("POSTGRES_DB").unwrap(), "pe_sakura_replay");
+    assert_eq!(std::env::var("POSTGRES_DB").unwrap(), "pe_sakura_projections_fe890e");
     assert_eq!(
         std::env::var("PE_REPLAY_CORE_URL").unwrap(),
-        "http://pe-sakura-replay-core:8000"
+        "http://pe-sakura-projections-core-fe890e:8000"
     );
     let dao = PostgresDAO::new(Network::Testnet);
     let client = dao.connection_pool.get().await.unwrap();
     let before = client.query_one("SELECT MAX(height), (SELECT count(*) FROM blocks), (SELECT count(*) FROM state_transitions), (SELECT count(*) FROM documents), (SELECT count(*) FROM data_contracts) FROM blocks", &[]).await.unwrap();
-    assert_eq!(before.get::<_, i32>(0), 702);
+    assert_eq!(before.get::<_, i32>(0), 708);
     let counts = (
         before.get::<_, i64>(1),
         before.get::<_, i64>(2),
@@ -315,7 +324,7 @@ async fn unsupported_real_moderation_block_does_not_commit_or_lose_retained_data
         before.get::<_, i64>(4),
     );
     let item = snapshot()
-        .find(|item| item["kind"] == "block" && item["height"] == 703)
+        .find(|item| item["kind"] == "block" && item["height"] == 709)
         .expect("actual moderation block required");
     let response: TenderdashRPCBlockResponse =
         serde_json::from_value(item["block"].clone()).unwrap();
@@ -345,7 +354,7 @@ async fn unsupported_real_moderation_block_does_not_commit_or_lose_retained_data
     let block = Block {
         header: BlockHeader {
             hash: response.block_id.hash,
-            height: 703,
+            height: 709,
             timestamp: h.timestamp,
             block_version: h.version.block.parse().unwrap(),
             app_version: h.version.app.parse().unwrap(),
@@ -365,14 +374,14 @@ async fn unsupported_real_moderation_block_does_not_commit_or_lose_retained_data
     assert!(matches!(
         error,
         crate::processor::psql::ProcessorError::TransactionError {
-            height: 703,
+            height: 709,
             index: 0,
-            stage: "handler compatibility",
+            stage: "moderation projection",
             ..
         }
     ));
     let after = client.query_one("SELECT MAX(height), (SELECT count(*) FROM blocks), (SELECT count(*) FROM state_transitions), (SELECT count(*) FROM documents), (SELECT count(*) FROM data_contracts) FROM blocks", &[]).await.unwrap();
-    assert_eq!(after.get::<_, i32>(0), 702);
+    assert_eq!(after.get::<_, i32>(0), 708);
     assert_eq!(
         counts,
         (
@@ -384,7 +393,7 @@ async fn unsupported_real_moderation_block_does_not_commit_or_lose_retained_data
     );
     let absent: i64 = client
         .query_one(
-            "SELECT count(*) FROM state_transitions WHERE block_height=703",
+            "SELECT count(*) FROM state_transitions WHERE block_height=709",
             &[],
         )
         .await
@@ -394,5 +403,5 @@ async fn unsupported_real_moderation_block_does_not_commit_or_lose_retained_data
         absent, 0,
         "unhandled successful transitions must neither be skipped nor partially committed"
     );
-    println!("Verified real block 703 fail-closed rollback; all retained block/transaction/document/contract counts unchanged");
+    println!("Verified real block 709 fail-closed rollback; all retained block/transaction/document/contract counts unchanged");
 }

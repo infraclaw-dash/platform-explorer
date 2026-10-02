@@ -151,7 +151,6 @@ impl PSQLProcessor {
             StateTransition::ShieldFromIdentity(_)
             | StateTransition::IdentityTopUpFromShieldedPool(_)
             | StateTransition::IdentityKeyLimitsUpdate(_)
-            | StateTransition::ContractUserModeration(_)
             | StateTransition::ContractFeeClaim(_) => {
                 return Err(ProcessorError::TransactionError {
                     height: block_height,
@@ -159,6 +158,9 @@ impl PSQLProcessor {
                     stage: "handler compatibility",
                     detail: format!("state transition type {st_type} has no complete Explorer projection; refusing to advance"),
                 });
+            }
+            StateTransition::ContractUserModeration(st) => {
+                self.handle_contract_moderation(st, st_hash.clone(), block_height, index as usize, sql_transaction).await?;
             }
             StateTransition::DataContractCreate(st) => {
                 self.handle_data_contract_create(st.clone(), st_hash.clone(), sql_transaction)
