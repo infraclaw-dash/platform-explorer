@@ -8,18 +8,13 @@ use base64::Engine;
 
 impl Indexer {
     pub(crate) async fn index_block(&self, block_height: i32) -> Result<(), ProcessorError> {
-        let block = self
-            .tenderdash_rpc
-            .get_block_by_height(block_height.clone())
-            .await?;
-        let block_results_response = self
-            .tenderdash_rpc
-            .get_block_results_by_height(block_height.clone())
-            .await?;
-        let (validators, quorum_hash) = self
-            .tenderdash_rpc
-            .get_validators_by_block_height(block_height.clone())
-            .await?;
+        // These immutable reads share a height; only RPC latency overlaps.
+        // Blocks and their SQL writes remain strictly ordered below.
+        let (block, block_results_response, (validators, quorum_hash)) = tokio::try_join!(
+            self.tenderdash_rpc.get_block_by_height(block_height),
+            self.tenderdash_rpc.get_block_results_by_height(block_height),
+            self.tenderdash_rpc.get_validators_by_block_height(block_height),
+        )?;
 
         let tx_results = block_results_response.txs_results.unwrap_or(vec![]);
 
