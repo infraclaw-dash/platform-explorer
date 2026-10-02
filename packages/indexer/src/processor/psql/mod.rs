@@ -12,6 +12,7 @@ use dpp::platform_value::string_encoding::Encoding::Base58;
 use dpp::platform_value::{platform_value, BinaryData};
 use dpp::state_transition::state_transitions::batch_transition::batched_transition::document_transition_action_type::DocumentTransitionActionType;
 use std::env;
+use std::cell::Cell;
 use std::num::ParseIntError;
 use dpp::dashcore::Network;
 
@@ -22,6 +23,17 @@ pub enum ProcessorError {
     DatabaseError,
     TenderdashTxResultNotExists,
     UnexpectedError,
+    TransactionError {
+        height: i32,
+        index: usize,
+        stage: &'static str,
+        detail: String,
+    },
+    BlockDatabaseError {
+        height: i32,
+        operation: &'static str,
+        detail: String,
+    },
 }
 
 impl From<PoolError> for ProcessorError {
@@ -51,20 +63,39 @@ pub struct PSQLProcessor {
     platform_explorer_identifier: Identifier,
     dashcore_rpc: Client,
     network: Network,
+    pub(crate) system_contracts_seeded: Cell<bool>,
 }
 
 // ST HASH, BLOCK HASH
 pub fn state_transition_duplicates(network: Network) -> Vec<(String, String)> {
     match network {
         Network::Mainnet => vec![
-            ("35C08D574302D32D7160E603D8159042C8606BE12FD97D952CF5FD40DB57313C".into(), "67DF4322B8062C17326414BC4D2D0FDDA60C44C44EF08592DFB01A3F125A0F25".into()),
-            ("6963A9535DBD3D47229BBE419DFC2E3011DC786D958F72A4B7BEEE3F24FBE097".into(), "6DDD512F5CE7D54B73C7DB877E6FB46F31B8721FD77D1D389CE598F4C9D6E458".into()),
+            (
+                "35C08D574302D32D7160E603D8159042C8606BE12FD97D952CF5FD40DB57313C".into(),
+                "67DF4322B8062C17326414BC4D2D0FDDA60C44C44EF08592DFB01A3F125A0F25".into(),
+            ),
+            (
+                "6963A9535DBD3D47229BBE419DFC2E3011DC786D958F72A4B7BEEE3F24FBE097".into(),
+                "6DDD512F5CE7D54B73C7DB877E6FB46F31B8721FD77D1D389CE598F4C9D6E458".into(),
+            ),
         ],
         Network::Testnet => vec![
-            ("1ba0895d9785eff87f0d69d1a7bc22b54e73d267fae3d14513af5c56358b42a5".into(), "9efa730c41ce9408f9732e4c72a4dae7a2701af0f7b1dce8a72f163e285bebf3".into()),
-            ("e2d274c484eceaba06864d537367e550bd278c09cb783ace45b999b92b02f8ef".into(), "9efa730c41ce9408f9732e4c72a4dae7a2701af0f7b1dce8a72f163e285bebf3".into()),
-            ("cf285c01204a6811a06b4b60f599870fffd77f2ceafd771c2608ed56a4454ca0".into(), "f72dd58af03236502b13cefa918bc13089a689b4cd06dbd44bbe277d1a77e0ab".into()),
-            ("9be24f6636e70d288c82a37c6b6ff9622e8f3f7c2b6dccb44d005305febeadad".into(), "f72dd58af03236502b13cefa918bc13089a689b4cd06dbd44bbe277d1a77e0ab".into()),
+            (
+                "1ba0895d9785eff87f0d69d1a7bc22b54e73d267fae3d14513af5c56358b42a5".into(),
+                "9efa730c41ce9408f9732e4c72a4dae7a2701af0f7b1dce8a72f163e285bebf3".into(),
+            ),
+            (
+                "e2d274c484eceaba06864d537367e550bd278c09cb783ace45b999b92b02f8ef".into(),
+                "9efa730c41ce9408f9732e4c72a4dae7a2701af0f7b1dce8a72f163e285bebf3".into(),
+            ),
+            (
+                "cf285c01204a6811a06b4b60f599870fffd77f2ceafd771c2608ed56a4454ca0".into(),
+                "f72dd58af03236502b13cefa918bc13089a689b4cd06dbd44bbe277d1a77e0ab".into(),
+            ),
+            (
+                "9be24f6636e70d288c82a37c6b6ff9622e8f3f7c2b6dccb44d005305febeadad".into(),
+                "f72dd58af03236502b13cefa918bc13089a689b4cd06dbd44bbe277d1a77e0ab".into(),
+            ),
         ],
         _ => vec![],
     }
@@ -89,6 +120,7 @@ impl PSQLProcessor {
             platform_explorer_identifier,
             dashcore_rpc,
             network,
+            system_contracts_seeded: Cell::new(false),
         }
     }
 
@@ -185,6 +217,8 @@ impl PSQLProcessor {
             SystemDataContract::TokenHistory => {}
             SystemDataContract::KeywordSearch => {}
             SystemDataContract::DocumentHistory => {}
+            SystemDataContract::AppConnect => {}
+            SystemDataContract::ModerationCharters => {}
         }
     }
 }

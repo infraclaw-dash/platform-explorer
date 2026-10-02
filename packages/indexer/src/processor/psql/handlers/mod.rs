@@ -1,5 +1,5 @@
 mod handle_batch;
-mod handle_block;
+pub(crate) mod handle_block;
 mod handle_data_contract;
 mod handle_documents;
 mod handle_identity;

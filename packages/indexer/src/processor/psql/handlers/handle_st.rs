@@ -2,7 +2,7 @@ use crate::entities::platform_address_transition::PlatformAddressTransition;
 use crate::entities::shielded_transition::ShieldedTransition;
 use crate::enums::batch_type::BatchType;
 use crate::models::{TransactionResult, TransactionStatus};
-use crate::processor::psql::PSQLProcessor;
+use crate::processor::psql::{PSQLProcessor, ProcessorError};
 use dashcore_rpc::dashcore::consensus::Decodable;
 use dashcore_rpc::RpcApi;
 use deadpool_postgres::Transaction;
@@ -26,30 +26,50 @@ impl PSQLProcessor {
         state_transition: StateTransition,
         tx_result: TransactionResult,
         sql_transaction: &Transaction<'_>,
-    ) -> () {
+    ) -> Result<(), ProcessorError> {
         let owner = state_transition.owner_id();
 
         let st_type = state_transition.state_transition_type() as u32;
 
         let batch_type: Option<BatchType> = match state_transition.clone() {
             StateTransition::Batch(batch_transition) => match batch_transition {
-                BatchTransition::V0(v0) => match v0.transitions.first().unwrap() {
+                BatchTransition::V0(v0) => match v0.transitions.first().ok_or_else(|| {
+                    ProcessorError::TransactionError {
+                        height: block_height,
+                        index: index as usize,
+                        stage: "batch validation",
+                        detail: "empty document batch".into(),
+                    }
+                })? {
                     DocumentTransition::Create(_) => Some(BatchType::DocumentCreateTransition),
                     DocumentTransition::Replace(_) => Some(BatchType::DocumentReplaceTransition),
                     DocumentTransition::Delete(_) => Some(BatchType::DocumentDeleteTransition),
+                    DocumentTransition::IndexOnlyDelete(_) => {
+                        Some(BatchType::DocumentIndexOnlyDeleteTransition)
+                    }
                     DocumentTransition::Transfer(_) => Some(BatchType::DocumentTransferTransition),
                     DocumentTransition::UpdatePrice(_) => {
                         Some(BatchType::DocumentUpdatePriceTransition)
                     }
                     DocumentTransition::Purchase(_) => Some(BatchType::DocumentPurchaseTransition),
                 },
-                BatchTransition::V1(v1) => match v1.transitions.first().unwrap() {
+                BatchTransition::V1(v1) => match v1.transitions.first().ok_or_else(|| {
+                    ProcessorError::TransactionError {
+                        height: block_height,
+                        index: index as usize,
+                        stage: "batch validation",
+                        detail: "empty batch".into(),
+                    }
+                })? {
                     BatchedTransition::Document(document_transition) => match document_transition {
                         DocumentTransition::Create(_) => Some(BatchType::DocumentCreateTransition),
                         DocumentTransition::Replace(_) => {
                             Some(BatchType::DocumentReplaceTransition)
                         }
                         DocumentTransition::Delete(_) => Some(BatchType::DocumentDeleteTransition),
+                        DocumentTransition::IndexOnlyDelete(_) => {
+                            Some(BatchType::DocumentIndexOnlyDeleteTransition)
+                        }
                         DocumentTransition::Transfer(_) => {
                             Some(BatchType::DocumentTransferTransition)
                         }
@@ -88,7 +108,15 @@ impl PSQLProcessor {
             _ => None,
         };
 
-        let bytes = PlatformSerializable::serialize_to_bytes(&state_transition.clone()).unwrap();
+        let bytes =
+            PlatformSerializable::serialize_to_bytes(&state_transition).map_err(|error| {
+                ProcessorError::TransactionError {
+                    height: block_height,
+                    index: index as usize,
+                    stage: "state transition serialization",
+                    detail: error.to_string(),
+                }
+            })?;
 
         let st_hash = digest(bytes.clone()).to_uppercase();
 
@@ -114,12 +142,24 @@ impl PSQLProcessor {
 
         match tx_result_status {
             TransactionStatus::FAIL => {
-                return;
+                return Ok(());
             }
             TransactionStatus::SUCCESS => {}
         }
 
         match state_transition {
+            StateTransition::ShieldFromIdentity(_)
+            | StateTransition::IdentityTopUpFromShieldedPool(_)
+            | StateTransition::IdentityKeyLimitsUpdate(_)
+            | StateTransition::ContractUserModeration(_)
+            | StateTransition::ContractFeeClaim(_) => {
+                return Err(ProcessorError::TransactionError {
+                    height: block_height,
+                    index: index as usize,
+                    stage: "handler compatibility",
+                    detail: format!("state transition type {st_type} has no complete Explorer projection; refusing to advance"),
+                });
+            }
             StateTransition::DataContractCreate(st) => {
                 self.handle_data_contract_create(st.clone(), st_hash.clone(), sql_transaction)
                     .await;
@@ -470,6 +510,7 @@ impl PSQLProcessor {
                     .unwrap();
             }
         }
+        Ok(())
     }
 
     fn get_asset_lock_amount(&self, asset_lock_proof: &AssetLockProof) -> u64 {

@@ -42,7 +42,7 @@ impl Indexer {
                 ));
 
                 return match tx_result.code {
-                    None => TransactionResult {
+                    None | Some(0) => TransactionResult {
                         data: tx_string.clone(),
                         gas_used: tx_result.gas_used.clone(),
                         status: TransactionStatus::SUCCESS,
@@ -58,18 +58,26 @@ impl Indexer {
             })
             .collect::<Vec<TransactionResult>>();
 
-        let txs = transactions.into_iter().filter(|tx| {
-      let bytes = general_purpose::STANDARD.decode(tx.data.clone()).unwrap();
-      let tx_hash = sha256::digest(bytes.clone()).to_uppercase();
-
-      let skip = self.txs_to_skip.contains(&format!("{}:{}", &block_hash, &tx_hash).to_lowercase());
-
-      if skip {
-        println!("Transaction {} from block with hash {} is skipped because it's marked that in TXS_TO_SKIP environment", &tx_hash, &block_hash);
-      }
-
-      return !skip;
-    }).collect::<Vec<TransactionResult>>();
+        let mut txs = Vec::with_capacity(transactions.len());
+        for (index, tx) in transactions.into_iter().enumerate() {
+            let bytes = general_purpose::STANDARD
+                .decode(&tx.data)
+                .map_err(|error| ProcessorError::TransactionError {
+                    height: block_height,
+                    index,
+                    stage: "base64 decode",
+                    detail: error.to_string(),
+                })?;
+            let tx_hash = sha256::digest(bytes).to_uppercase();
+            let skip = self
+                .txs_to_skip
+                .contains(&format!("{}:{}", &block_hash, &tx_hash).to_lowercase());
+            if skip {
+                println!("Transaction {} from block with hash {} is skipped because it's marked that in TXS_TO_SKIP environment", &tx_hash, &block_hash);
+            } else {
+                txs.push(tx);
+            }
+        }
 
         let timestamp = block.block.header.timestamp;
         let block_version = block.block.header.version.block.parse::<i32>()?;

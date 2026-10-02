@@ -45,6 +45,21 @@ impl Indexer {
             ProcessorError::TenderdashTxResultNotExists => {
                 println!("Block TX Count length and Block Results Tx Count length did not match for height {}, retrying...", block_height);
             }
+            ProcessorError::TransactionError {
+                height,
+                index,
+                stage,
+                detail,
+            } => {
+                eprintln!("Block {height}, transaction {index}: {stage} failed: {detail}; block not advanced, retrying");
+            }
+            ProcessorError::BlockDatabaseError {
+                height,
+                operation,
+                detail,
+            } => {
+                eprintln!("Block {height}: database {operation} failed: {detail}; block not advanced, retrying");
+            }
         }
     }
 }

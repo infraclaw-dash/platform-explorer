@@ -13,6 +13,7 @@ use dpp::state_transition::batch_transition::batched_transition::document_purcha
 use dpp::state_transition::batch_transition::batched_transition::document_transfer_transition::v0::v0_methods::DocumentTransferTransitionV0Methods;
 use dpp::state_transition::batch_transition::batched_transition::document_update_price_transition::v0::v0_methods::DocumentUpdatePriceTransitionV0Methods;
 use dpp::state_transition::batch_transition::document_base_transition::document_base_transition_trait::DocumentBaseTransitionAccessors;
+use dpp::state_transition::batch_transition::batched_transition::document_index_only_delete_transition::v0::v0_methods::DocumentIndexOnlyDeleteTransitionV0Methods;
 use serde_json::Value;
 use tokio_postgres::Row;
 
@@ -96,6 +97,24 @@ impl From<DocumentTransition> for Document {
                     price: None,
                     data: None,
                     data_contract_identifier,
+                    revision: None,
+                    deleted: true,
+                    is_system: false,
+                    prefunded_voting_balance: None,
+                }
+            }
+            DocumentTransition::IndexOnlyDelete(transition) => {
+                let base = transition.base();
+                // An index-only delete carries its full property tuple: retain it
+                // along with the tombstone rather than dropping this new action.
+                Document {
+                    identifier: base.id(),
+                    document_type_name: base.document_type_name().clone(),
+                    transition_type,
+                    owner: None,
+                    price: None,
+                    data: Some(serde_json::to_value(transition.data()).unwrap()),
+                    data_contract_identifier: base.data_contract_id(),
                     revision: None,
                     deleted: true,
                     is_system: false,
@@ -192,6 +211,8 @@ impl From<Row> for Document {
             3 => DocumentTransitionActionType::Transfer,
             4 => DocumentTransitionActionType::Purchase,
             5 => DocumentTransitionActionType::UpdatePrice,
+            6 => DocumentTransitionActionType::IgnoreWhileBumpingRevision,
+            7 => DocumentTransitionActionType::IndexOnlyDelete,
             _ => panic!("Unknown document transition type"),
         };
 

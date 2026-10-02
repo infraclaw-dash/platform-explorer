@@ -1,6 +1,6 @@
-use std::env;
-use dotenv::dotenv;
 use crate::processor::psql::PostgresDAO;
+use dotenv::dotenv;
+use std::env;
 
 mod decoder;
 mod entities;
@@ -29,7 +29,10 @@ async fn main() {
         match arg.as_str() {
             "drop_db" => {
                 let pool = PostgresDAO::create_pool();
-                let client = pool.get().await.expect("Failed to get a database connection");
+                let client = pool
+                    .get()
+                    .await
+                    .expect("Failed to get a database connection");
 
                 client
                     .batch_execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
@@ -42,7 +45,10 @@ async fn main() {
             }
             "migrate" => {
                 let pool = PostgresDAO::create_pool();
-                let mut client = pool.get().await.expect("Failed to get a database connection");
+                let mut client = pool
+                    .get()
+                    .await
+                    .expect("Failed to get a database connection");
 
                 let report = embedded::migrations::runner()
                     .run_async(&mut **client)
@@ -61,3 +67,6 @@ async fn main() {
 
     indexer.start().await;
 }
+
+#[cfg(test)]
+mod replay_tests;

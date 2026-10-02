@@ -18,6 +18,8 @@ pub enum BatchType {
     TokenConfigUpdateTransition,
     TokenDirectPurchaseTransition,
     TokenSetPriceForDirectPurchaseTransition,
+    // Append-only: existing database discriminants must never shift.
+    DocumentIndexOnlyDeleteTransition,
 }
 
 impl fmt::Display for BatchType {
@@ -26,6 +28,7 @@ impl fmt::Display for BatchType {
             BatchType::DocumentCreateTransition => "DOCUMENT_CREATE",
             BatchType::DocumentReplaceTransition => "DOCUMENT_REPLACE",
             BatchType::DocumentDeleteTransition => "DOCUMENT_DELETE",
+            BatchType::DocumentIndexOnlyDeleteTransition => "DOCUMENT_INDEX_ONLY_DELETE",
             BatchType::DocumentTransferTransition => "DOCUMENT_TRANSFER",
             BatchType::DocumentUpdatePriceTransition => "DOCUMENT_UPDATE_PRICE",
             BatchType::DocumentPurchaseTransition => "DOCUMENT_PURCHASE",
@@ -45,5 +48,19 @@ impl fmt::Display for BatchType {
         };
 
         write!(f, "{batch_type_string}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn adding_index_only_delete_does_not_reinterpret_retained_rows() {
+        assert_eq!(BatchType::TokenBurnTransition as i32, 6);
+        assert_eq!(
+            BatchType::TokenSetPriceForDirectPurchaseTransition as i32,
+            16
+        );
+        assert_eq!(BatchType::DocumentIndexOnlyDeleteTransition as i32, 17);
     }
 }
