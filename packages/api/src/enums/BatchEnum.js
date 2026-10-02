@@ -16,6 +16,8 @@ const BatchEnum = {
   TOKEN_CONFIG_UPDATE: 14,
   TOKEN_DIRECT_PURCHASE: 15,
   TOKEN_SET_PRICE_FOR_DIRECT_PURCHASE: 16,
+  DOCUMENT_INDEX_ONLY_DELETE: 17,
+  17: 'DOCUMENT_INDEX_ONLY_DELETE',
   0: 'DOCUMENT_CREATE',
   1: 'DOCUMENT_REPLACE',
   2: 'DOCUMENT_DELETE',
@@ -42,6 +44,7 @@ BatchEnum.delete = BatchEnum[2]
 BatchEnum.transfer = BatchEnum[3]
 BatchEnum.purchase = BatchEnum[4]
 BatchEnum.updatePrice = BatchEnum[5]
+BatchEnum.indexOnlyDelete = BatchEnum[17]
 // pshenmic-dpp remap tokens
 BatchEnum.Burn = BatchEnum[6]
 BatchEnum.Mint = BatchEnum[7]

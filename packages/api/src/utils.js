@@ -341,7 +341,14 @@ const tokensConfigToArray = (config, dataContractId) => {
 }
 
 const decodeStateTransition = async (base64) => {
-  const stateTransition = StateTransitionWASM.fromBase64(base64)
+  let stateTransition
+  try {
+    stateTransition = StateTransitionWASM.fromBase64(base64)
+  } catch (error) {
+    // Only wire decoding failures select the pinned official decoder. Formatting
+    // bugs must not silently change response schemas by selecting another path.
+    return require('./protocolDecoder').decodeProtocolStateTransition(base64)
+  }
 
   const decoded = {
     type: stateTransition.getActionTypeNumber(),
@@ -997,7 +1004,8 @@ const decodeStateTransition = async (base64) => {
       }
 
       decoded.identityId = stateTransition.getOwnerId().base58()
-      decoded.amount = String(output.value * 1000n)
+      // Chain-lock proofs carry an outpoint, not the referenced output amount.
+      decoded.amount = output ? String(output.value * 1000n) : null
       decoded.signature = Buffer.from(stateTransition.signature ?? []).toString('hex') ?? null
       decoded.raw = stateTransition.hex()
 
