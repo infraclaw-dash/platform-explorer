@@ -1,6 +1,6 @@
-//! Explorer projections of successful direct moderation. Consensus validation is
-//! not repeated here. A proposal/approval is NOT a deletion: without an
-//! authoritative seated charter/election outcome we refuse the complete block.
+//! Explorer projections of successful moderation. Consensus validation is not
+//! repeated here. A proposal/approval is an event, not evidence of deletion;
+//! retain it with an explicitly unavailable outcome instead of inventing effects.
 use super::super::{PSQLProcessor, ProcessorError};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use deadpool_postgres::Transaction;
@@ -15,7 +15,16 @@ use dpp::state_transition::contract_user_moderation_transition::{
 use dpp::state_transition::StateTransition;
 use serde_json::{json, Value};
 
-const TEAM_OUTCOME_REQUIRED: &str = "historical seated moderation charter/election outcome required: leader, seat capacity, active members and settled-deletion rule; successful proposal/approval does not prove deletion";
+fn projection_outcome(action: &Action) -> Value {
+    match action {
+        Action::DeleteSettledDocument { .. } | Action::ApproveTeamAction { .. } => json!({
+            "status": "unavailable",
+            "documentDeleted": null,
+            "reason": "Successful proposal or approval does not establish the team action outcome"
+        }),
+        _ => json!({"status": "projected"}),
+    }
+}
 
 // Explicit Explorer JSON mapping: do not alter DPP feature flags or libraries
 // merely to obtain a serde representation for the upstream enum.
@@ -212,12 +221,6 @@ impl PSQLProcessor {
         tx: &Transaction<'_>,
     ) -> Result<(), String> {
         let ContractUserModerationTransition::V0(st) = transition;
-        if matches!(
-            &st.action,
-            Action::DeleteSettledDocument { .. } | Action::ApproveTeamAction { .. }
-        ) {
-            return Err(TEAM_OUTCOME_REQUIRED.into());
-        }
         let contract = st.data_contract_id.to_string(Base58);
         let moderator = st.owner_id.to_string(Base58);
         let time: i64 = tx
@@ -229,7 +232,8 @@ impl PSQLProcessor {
             .map_err(|e| e.to_string())?
             .get(0);
         let action = action_json(&st.action);
-        tx.execute("INSERT INTO contract_moderation_events(state_transition_hash,contract_identifier,moderator_identifier,timestamp_ms,action) VALUES ($1,$2,$3,$4,$5)", &[&hash,&contract,&moderator,&time,&action]).await.map_err(|e| e.to_string())?;
+        let outcome = projection_outcome(&st.action);
+        tx.execute("INSERT INTO contract_moderation_events(state_transition_hash,contract_identifier,moderator_identifier,timestamp_ms,action,outcome) VALUES ($1,$2,$3,$4,$5,$6)", &[&hash,&contract,&moderator,&time,&action,&outcome]).await.map_err(|e| e.to_string())?;
         match &st.action {
             Action::Ban { identity_id, .. }
             | Action::Unban { identity_id }
@@ -352,9 +356,9 @@ impl PSQLProcessor {
                 .map_err(|e| e.to_string())?;
                 let id = restored.id().to_string(Base58);
                 let current = current_document(tx, &contract, document_type_name, &id).await?;
-                if !current.get::<_, bool>("deleted") {
-                    return Err("restore targets a non-deleted Explorer document".into());
-                }
+                // The successful restore carries the full authoritative document.
+                // A preceding team deletion (or ordinary batch deletion) need not
+                // have a direct-moderation removal row in this Explorer projection.
                 let owner: String = current.get("owner");
                 if owner.trim() != restored.owner_id().to_string(Base58) {
                     return Err("restored owner differs from retained document owner".into());
@@ -381,15 +385,11 @@ impl PSQLProcessor {
                     current.get("moderated_by"),
                 )
                 .await?;
-                let n = tx.execute("UPDATE contract_moderation_document_removals SET restored_by_transition=$1 WHERE contract_identifier=$2 AND document_type_name=$3 AND document_identifier=$4 AND restored_by_transition IS NULL", &[&hash,&contract,&document_type_name,&id]).await.map_err(|e| e.to_string())?;
-                if n != 1 {
-                    return Err(format!(
-                        "restore needs exactly one retained removal; found {n}"
-                    ));
-                }
+                tx.execute("UPDATE contract_moderation_document_removals SET restored_by_transition=$1 WHERE contract_identifier=$2 AND document_type_name=$3 AND document_identifier=$4 AND restored_by_transition IS NULL", &[&hash,&contract,&document_type_name,&id]).await.map_err(|e| e.to_string())?;
             }
             Action::DeleteSettledDocument { .. } | Action::ApproveTeamAction { .. } => {
-                unreachable!("guarded before writes")
+                // Full signed transition, successful result and action event are
+                // retained. Do not turn a proposal/signature into a tombstone.
             }
         }
         self.handle_data_contract_transition(Some(hash.into()), st.data_contract_id, tx)
@@ -403,7 +403,7 @@ mod tests {
     use super::*;
     use dpp::data_contract::config::moderation::ContractModerationReason;
     #[tokio::test]
-    async fn actual_moderation_fixtures_decode_losslessly_and_identify_next_outcome_gate() {
+    async fn actual_moderation_fixtures_decode_losslessly_and_preserve_unknown_outcomes() {
         use dpp::serialization::PlatformSerializable;
         let fixtures: Value = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/sakura-moderation.json"
@@ -435,8 +435,13 @@ mod tests {
                     assert_eq!(document_type_name, "post");
                     direct += 1;
                 }
-                709 => assert!(matches!(st.action, Action::DeleteSettledDocument { .. })),
-                710 => assert!(matches!(st.action, Action::ApproveTeamAction { .. })),
+                709 | 710 => {
+                    assert!(matches!(st.action, Action::DeleteSettledDocument { .. } | Action::ApproveTeamAction { .. }));
+                    let outcome = projection_outcome(&st.action);
+                    assert_eq!(outcome["status"], "unavailable");
+                    assert!(outcome["documentDeleted"].is_null());
+                    assert!(action_json(&st.action).is_object());
+                }
                 771 | 774 | 778 | 779 | 951 => {
                     identity_effect(json!({}), &st.action, 42, "moderator").unwrap();
                     direct += 1;

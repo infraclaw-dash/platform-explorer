@@ -256,6 +256,25 @@ async fn replay_snapshot_to_isolated_db_without_skipping() {
                     assert!(row.get::<_,bool>(4));
                     assert_eq!(row.get::<_,String>(5).trim(),"515D22E4A0F26BB5F6B76345E3F2AD84B59899E50F40FFA89BD9936E6410071C");
                 }
+                if blocks == 709 || blocks == 710 {
+                    let event = client.query_one("SELECT e.action,e.outcome,(SELECT count(*) FROM documents d WHERE d.state_transition_hash=s.hash) FROM contract_moderation_events e JOIN state_transitions s ON s.hash=e.state_transition_hash WHERE s.block_height=$1", &[&blocks]).await.unwrap();
+                    assert_eq!(event.get::<_,serde_json::Value>(1)["status"], "unavailable");
+                    assert!(event.get::<_,serde_json::Value>(1)["documentDeleted"].is_null());
+                    assert_eq!(event.get::<_,i64>(2), 0, "team event must not invent a tombstone");
+                }
+                if blocks == 777 {
+                    let restored = client.query_one("SELECT d.deleted,d.data,d.owner,s.owner FROM documents d JOIN state_transitions s ON s.hash=d.state_transition_hash WHERE s.block_height=777", &[]).await.unwrap();
+                    assert!(!restored.get::<_,bool>(0));
+                    assert!(restored.get::<_,Option<serde_json::Value>>(1).is_some());
+                    assert_ne!(restored.get::<_,String>(2), restored.get::<_,String>(3), "restored document owner is not the moderator");
+                }
+                if blocks == 950 {
+                    let claim = client.query_one("SELECT e.amount IS NULL,e.recipients IS NULL,e.outcome,(SELECT count(*) FROM transfers t WHERE t.state_transition_hash=s.hash) FROM contract_fee_claim_events e JOIN state_transitions s ON s.hash=e.state_transition_hash WHERE s.block_height=950", &[]).await.unwrap();
+                    assert!(claim.get::<_,bool>(0));
+                    assert!(claim.get::<_,bool>(1));
+                    assert_eq!(claim.get::<_,serde_json::Value>(2)["status"], "unavailable");
+                    assert_eq!(claim.get::<_,i64>(3), 0, "claim event must not invent a payout");
+                }
                 let persisted = client
                     .query(
                         "SELECT data FROM state_transitions WHERE block_height = $1 ORDER BY index",
@@ -303,7 +322,7 @@ async fn replay_snapshot_to_isolated_db_without_skipping() {
 
 #[tokio::test]
 #[ignore = "requires retained disposable replay DB at block 708 and captured block 709"]
-async fn unsupported_team_proposal_does_not_commit_or_lose_retained_data() {
+async fn team_proposal_commits_event_without_inventing_deletion() {
     assert_eq!(
         std::env::var("POSTGRES_HOST").unwrap(),
         "pe-sakura-projections-db-fe890e"
@@ -314,7 +333,9 @@ async fn unsupported_team_proposal_does_not_commit_or_lose_retained_data() {
         "http://pe-sakura-projections-core-fe890e:8000"
     );
     let dao = PostgresDAO::new(Network::Testnet);
-    let client = dao.connection_pool.get().await.unwrap();
+    let mut client = dao.connection_pool.get().await.unwrap();
+    crate::embedded::migrations::runner()
+        .run_async(&mut **client).await.unwrap();
     let before = client.query_one("SELECT MAX(height), (SELECT count(*) FROM blocks), (SELECT count(*) FROM state_transitions), (SELECT count(*) FROM documents), (SELECT count(*) FROM data_contracts) FROM blocks", &[]).await.unwrap();
     assert_eq!(before.get::<_, i32>(0), 708);
     let counts = (
@@ -367,41 +388,20 @@ async fn unsupported_team_proposal_does_not_commit_or_lose_retained_data() {
     };
     let core = Client::new(&std::env::var("PE_REPLAY_CORE_URL").unwrap(), Auth::None).unwrap();
     let processor = PSQLProcessor::new(core, Network::Testnet);
-    let error = processor
+    processor
         .handle_block(block, Vec::<Validator>::try_from(validators).unwrap())
         .await
-        .unwrap_err();
-    assert!(matches!(
-        error,
-        crate::processor::psql::ProcessorError::TransactionError {
-            height: 709,
-            index: 0,
-            stage: "moderation projection",
-            ..
-        }
-    ));
+        .unwrap();
     let after = client.query_one("SELECT MAX(height), (SELECT count(*) FROM blocks), (SELECT count(*) FROM state_transitions), (SELECT count(*) FROM documents), (SELECT count(*) FROM data_contracts) FROM blocks", &[]).await.unwrap();
-    assert_eq!(after.get::<_, i32>(0), 708);
-    assert_eq!(
-        counts,
-        (
-            after.get::<_, i64>(1),
-            after.get::<_, i64>(2),
-            after.get::<_, i64>(3),
-            after.get::<_, i64>(4)
-        )
-    );
-    let absent: i64 = client
-        .query_one(
-            "SELECT count(*) FROM state_transitions WHERE block_height=709",
-            &[],
-        )
-        .await
-        .unwrap()
-        .get(0);
-    assert_eq!(
-        absent, 0,
-        "unhandled successful transitions must neither be skipped nor partially committed"
-    );
-    println!("Verified real block 709 fail-closed rollback; all retained block/transaction/document/contract counts unchanged");
+    assert_eq!(after.get::<_, i32>(0), 709);
+    assert_eq!(after.get::<_, i64>(1), counts.0 + 1);
+    assert_eq!(after.get::<_, i64>(2), counts.1 + 1);
+    assert_eq!(after.get::<_, i64>(3), counts.2, "proposal is not evidence of deletion");
+    assert_eq!(after.get::<_, i64>(4), counts.3);
+    let event = client.query_one("SELECT e.action, e.outcome, s.status FROM contract_moderation_events e JOIN state_transitions s ON s.hash=e.state_transition_hash WHERE s.block_height=709", &[]).await.unwrap();
+    assert_eq!(event.get::<_, serde_json::Value>(0)["type"], "deleteSettledDocument");
+    assert_eq!(event.get::<_, serde_json::Value>(1)["status"], "unavailable");
+    assert!(event.get::<_, serde_json::Value>(1)["documentDeleted"].is_null());
+    assert_eq!(event.get::<_, String>(2).trim(), "SUCCESS");
+    println!("Verified real block 709 proposal event: source/result retained, no invented document deletion");
 }

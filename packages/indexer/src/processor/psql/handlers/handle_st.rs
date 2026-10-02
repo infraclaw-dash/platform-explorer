@@ -150,8 +150,7 @@ impl PSQLProcessor {
         match state_transition {
             StateTransition::ShieldFromIdentity(_)
             | StateTransition::IdentityTopUpFromShieldedPool(_)
-            | StateTransition::IdentityKeyLimitsUpdate(_)
-            | StateTransition::ContractFeeClaim(_) => {
+            | StateTransition::IdentityKeyLimitsUpdate(_) => {
                 return Err(ProcessorError::TransactionError {
                     height: block_height,
                     index: index as usize,
@@ -161,6 +160,9 @@ impl PSQLProcessor {
             }
             StateTransition::ContractUserModeration(st) => {
                 self.handle_contract_moderation(st, st_hash.clone(), block_height, index as usize, sql_transaction).await?;
+            }
+            StateTransition::ContractFeeClaim(st) => {
+                self.handle_contract_fee_claim(st, st_hash.clone(), block_height, index as usize, sql_transaction).await?;
             }
             StateTransition::DataContractCreate(st) => {
                 self.handle_data_contract_create(st.clone(), st_hash.clone(), sql_transaction)

@@ -147,7 +147,7 @@ impl PostgresDAO {
         FROM documents \
         LEFT JOIN data_contracts ON data_contracts.id = documents.data_contract_id \
         WHERE documents.identifier = $1 \
-        ORDER by revision DESC \
+        ORDER by documents.id DESC \
         LIMIT 1;").await.unwrap();
 
         let rows: Vec<Row> = sql_transaction

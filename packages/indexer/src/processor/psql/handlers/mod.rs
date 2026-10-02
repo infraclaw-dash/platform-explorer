@@ -1,5 +1,6 @@
 mod handle_batch;
 mod handle_contract_moderation;
+mod handle_contract_fee_claim;
 pub(crate) mod handle_block;
 mod handle_data_contract;
 mod handle_documents;
