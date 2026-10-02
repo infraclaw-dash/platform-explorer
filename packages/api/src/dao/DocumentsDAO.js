@@ -58,7 +58,7 @@ module.exports = class DocumentsDAO {
       return null
     }
 
-    const aliasDocument = await getAliasDocumentForIdentifier(row.document_owner.trim(), this.sdk)
+    const aliasDocument = await getAliasDocumentForIdentifier(row.document_owner.trim(), this.sdk, this.knex)
 
     const aliases = []
 
@@ -168,7 +168,7 @@ module.exports = class DocumentsDAO {
 
     const owners = rows.map(row => row.document_owner.trim())
 
-    const aliasDocuments = await getAliasDocumentForIdentifiers(owners, this.sdk)
+    const aliasDocuments = await getAliasDocumentForIdentifiers(owners, this.sdk, this.knex)
 
     const resultSet = await Promise.all(rows.map(async (row) => {
       const aliasDocument = aliasDocuments[row.document_owner.trim()]
@@ -219,7 +219,7 @@ module.exports = class DocumentsDAO {
 
     const owners = rows.map(row => row.owner.trim())
 
-    const aliasDocuments = await getAliasDocumentForIdentifiers(owners, this.sdk)
+    const aliasDocuments = await getAliasDocumentForIdentifiers(owners, this.sdk, this.knex)
 
     const resultSet = await Promise.all(rows.map(async (row) => {
       const aliasDocument = aliasDocuments[row.owner.trim()]

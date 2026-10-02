@@ -386,7 +386,7 @@ module.exports = class IdentitiesDAO {
 
     const identifiers = rows.map(row => row.identifier.trim())
 
-    const aliasDocuments = await getAliasDocumentForIdentifiers(identifiers, this.sdk)
+    const aliasDocuments = await getAliasDocumentForIdentifiers(identifiers, this.sdk, this.knex)
 
     const resultSet = await Promise.all(rows.map(async row => {
       const balance = await this.sdk.identities.getIdentityBalance(row.identifier.trim())
@@ -535,7 +535,7 @@ module.exports = class IdentitiesDAO {
 
     const owners = rows.map(row => row.document_owner.trim())
 
-    const aliasDocuments = await getAliasDocumentForIdentifiers(owners, this.sdk)
+    const aliasDocuments = await getAliasDocumentForIdentifiers(owners, this.sdk, this.knex)
 
     const resultSet = await Promise.all(rows.map(async (row) => {
       const aliasDocument = aliasDocuments[row.document_owner.trim()]
@@ -750,7 +750,7 @@ module.exports = class IdentitiesDAO {
 
     const identifiers = rows.map(row => row.identifier.trim())
 
-    const aliasDocuments = await getAliasDocumentForIdentifiers(identifiers, this.sdk)
+    const aliasDocuments = await getAliasDocumentForIdentifiers(identifiers, this.sdk, this.knex)
 
     const resultSet = await Promise.all(rows.map(async row => {
       const aliasDocument = aliasDocuments[row.identifier.trim()]

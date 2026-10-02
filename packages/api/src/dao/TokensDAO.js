@@ -4,7 +4,8 @@ const TokenTransitionsEnum = require('../enums/TokenTransitionsEnum')
 const Localization = require('../models/Localization')
 const { fetchTokenInfoByRows, getAliasDocumentForIdentifiers } = require('../utils')
 const BatchEnum = require('../enums/BatchEnum')
-const { getAliasFromDocument } = require('../utils')
+const { getAliasFromDocument, decodeStateTransition } = require('../utils')
+const { isContractVersionError, getIndexedTokenContract } = require('../indexedEnrichment')
 
 module.exports = class TokensDAO {
   constructor (knex, sdk) {
@@ -65,7 +66,7 @@ module.exports = class TokensDAO {
 
     const totalCount = rows.length > 0 ? Number(rows[0].total_count) : 0
 
-    const tokens = await fetchTokenInfoByRows(rows, this.sdk)
+    const tokens = await fetchTokenInfoByRows(rows, this.sdk, this.knex)
 
     return new PaginatedResultSet(tokens, page, limit, totalCount)
   }
@@ -113,7 +114,7 @@ module.exports = class TokensDAO {
       return undefined
     }
 
-    const [tokenWithFullInfo] = await fetchTokenInfoByRows(rows, this.sdk)
+    const [tokenWithFullInfo] = await fetchTokenInfoByRows(rows, this.sdk, this.knex)
 
     return tokenWithFullInfo
   }
@@ -144,7 +145,7 @@ module.exports = class TokensDAO {
 
     const owners = rows.map(row => row.owner.trim())
 
-    const aliasDocuments = await getAliasDocumentForIdentifiers(owners, this.sdk)
+    const aliasDocuments = await getAliasDocumentForIdentifiers(owners, this.sdk, this.knex)
 
     const resultSet = await Promise.all(rows.map(async (row) => {
       const aliasDocument = aliasDocuments[row.owner.trim()]
@@ -217,9 +218,17 @@ module.exports = class TokensDAO {
       .leftJoin('data_contracts', 'data_contracts.id', 'data_contract_id')
 
     const resultSet = await Promise.all(rows.map(async (row) => {
-      const dataContract = await this.sdk.dataContracts.getDataContractByIdentifier(row.data_contract_identifier)
-
-      const token = dataContract.tokens.find(({ position }) => position === row.position)
+      let token
+      try {
+        const dataContract = await this.sdk.dataContracts.getDataContractByIdentifier(row.data_contract_identifier)
+        token = dataContract.tokens.find(({ position }) => position === row.position)
+      } catch (error) {
+        if (!isContractVersionError(error)) throw error
+        const contract = await getIndexedTokenContract(this.knex, row.data_contract_identifier, decodeStateTransition)
+        const config = contract.tokens.find(({ position }) => position === row.position)
+        if (!config) throw new Error(`Indexed token configuration unavailable: ${row.data_contract_identifier}/${row.position}`)
+        token = { tokenConfiguration: config }
+      }
 
       if (token == null) {
         return null
@@ -274,7 +283,7 @@ module.exports = class TokensDAO {
       return new PaginatedResultSet([], page, limit, 0)
     }
 
-    const tokens = await fetchTokenInfoByRows(rows.map(row => ({ ...row, owner: identifier })), this.sdk)
+    const tokens = await fetchTokenInfoByRows(rows.map(row => ({ ...row, owner: identifier })), this.sdk, this.knex)
 
     const tokenIdentifierList = tokens.map((token) => token.identifier)
 
@@ -319,7 +328,7 @@ module.exports = class TokensDAO {
 
     const [row] = rows
 
-    const resultSet = await fetchTokenInfoByRows(rows, this.sdk)
+    const resultSet = await fetchTokenInfoByRows(rows, this.sdk, this.knex)
 
     return new PaginatedResultSet(resultSet, page, limit, Number(row?.total_count ?? 0))
   }
@@ -357,7 +366,7 @@ module.exports = class TokensDAO {
       }
     }, {})
 
-    const aliasDocuments = await getAliasDocumentForIdentifiers(holders, this.sdk)
+    const aliasDocuments = await getAliasDocumentForIdentifiers(holders, this.sdk, this.knex)
 
     const resultSet = await Promise.all(rows.map(async (row) => {
       const aliasDocument = aliasDocuments[row.holder.trim()]

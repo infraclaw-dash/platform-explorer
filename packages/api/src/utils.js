@@ -1,4 +1,5 @@
 const crypto = require('crypto')
+const { isContractVersionError, isDocumentVersionError, getIndexedTokenContract, indexedTokenToModel, getIndexedAliasDocument } = require('./indexedEnrichment')
 const StateTransitionEnum = require('./enums/StateTransitionEnum')
 const DocumentActionEnum = require('./enums/DocumentActionEnum')
 const net = require('net')
@@ -90,15 +91,29 @@ const outputScriptToAddress = (script) => {
   return address ? address.toString() : null
 }
 
-const fetchTokenInfoByRows = async (rows, sdk) => {
+const fetchTokenInfoByRows = async (rows, sdk, knex) => {
   const owners = rows
     .filter(row => row.owner)
     .map(row => row.owner?.trim())
 
-  const aliasDocuments = await getAliasDocumentForIdentifiers(owners, sdk)
+  const aliasDocuments = await getAliasDocumentForIdentifiers(owners, sdk, knex)
 
   const dataContractsWithTokens = await Promise.all(rows.map(async (row) => {
-    const dataContract = await sdk.dataContracts.getDataContractByIdentifier(row.data_contract_identifier)
+    let dataContract
+    try {
+      dataContract = await sdk.dataContracts.getDataContractByIdentifier(row.data_contract_identifier)
+    } catch (error) {
+      if (!knex || !isContractVersionError(error)) throw error
+      const contract = await getIndexedTokenContract(knex, row.data_contract_identifier, decodeStateTransition)
+      const positions = row.tokens ? row.tokens.map(token => Number(token.position)) : [Number(row.position)]
+      const alias = row.owner ? aliasDocuments[row.owner.trim()] : undefined
+      const priceTx = row.price_transition_data ? (await decodeStateTransition(row.price_transition_data)).transitions[0] : null
+      return Promise.all(positions.map(position => {
+        const config = contract.tokens.find(token => token.position === position)
+        if (!config) throw new Error(`Indexed token configuration unavailable: ${row.data_contract_identifier}/${position}`)
+        return indexedTokenToModel(contract, config, row, alias ? [getAliasFromDocument(alias)] : [], sdk, priceTx)
+      }))
+    }
 
     if (!dataContract) {
       return undefined
@@ -1938,13 +1953,14 @@ const getAliasStateByVote = (aliasInfo, alias, identifier) => {
 const getAliasFromDocument = (aliasDocument) => {
   const { label, parentDomainName, normalizedLabel } = aliasDocument.properties
   const documentId = aliasDocument.id
-  const timestamp = new Date(Number(aliasDocument.createdAt))
+  const timestamp = aliasDocument.createdAt == null ? null : new Date(Number(aliasDocument.createdAt))
 
   const alias = `${label}${parentDomainName ? '.' : ''}${parentDomainName}`
 
   return {
     alias,
-    status: 'ok',
+    status: aliasDocument.aliasStatus ?? 'ok',
+    ...(aliasDocument.source ? { source: aliasDocument.source } : {}),
     timestamp,
     documentId: documentId.base58(),
     contested: /^[a-zA-Z01-]{3,19}$/.test(normalizedLabel)
@@ -1990,18 +2006,22 @@ const sleep = (ms) => {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-const getAliasDocumentForIdentifier = async (identifier, sdk) => {
-  const [alias] = await sdk.documents.query(DPNS_CONTRACT, 'domain', [['records.identity', '=', identifier]], [], 1)
-
-  return alias
+const getAliasDocumentForIdentifier = async (identifier, sdk, knex) => {
+  try {
+    const [alias] = await sdk.documents.query(DPNS_CONTRACT, 'domain', [['records.identity', '=', identifier]], [], 1)
+    return alias
+  } catch (error) {
+    if (!knex || !isDocumentVersionError(error)) throw error
+    return getIndexedAliasDocument(knex, identifier)
+  }
 }
 
-const getAliasDocumentForIdentifiers = async (identifiers, sdk) => {
+const getAliasDocumentForIdentifiers = async (identifiers, sdk, knex) => {
   const identifiersWithoutDuplicates = identifiers.filter((item, pos) => identifiers.indexOf(item) === pos)
 
   const identifiersWithAliasDocument = await Promise.all(identifiersWithoutDuplicates.map(
     async (identifier) => {
-      const alias = await getAliasDocumentForIdentifier(identifier, sdk)
+      const alias = await getAliasDocumentForIdentifier(identifier, sdk, knex)
 
       return {
         owner: identifier,

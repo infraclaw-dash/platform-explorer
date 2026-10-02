@@ -268,7 +268,7 @@ module.exports = class PlatformAddressesDAO {
 
     const identifiers = rows.filter(row => row.owner != null).map(row => row.owner?.trim())
 
-    const aliasDocuments = await getAliasDocumentForIdentifiers(identifiers, this.sdk)
+    const aliasDocuments = await getAliasDocumentForIdentifiers(identifiers, this.sdk, this.knex)
 
     const resultSet = rows.map(row => {
       const aliasDocument = aliasDocuments[row.owner?.trim()]

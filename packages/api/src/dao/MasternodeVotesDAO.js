@@ -78,7 +78,7 @@ module.exports = class MasternodeVotesDAO {
       .filter(row => row.towards_identity_identifier)
       .map(row => row.towards_identity_identifier.trim())
 
-    const aliasDocuments = await getAliasDocumentForIdentifiers(identifiers, this.sdk)
+    const aliasDocuments = await getAliasDocumentForIdentifiers(identifiers, this.sdk, this.knex)
 
     const resultSet = await Promise.all(rows.map(async (row) => {
       const aliasDocument = row.towards_identity_identifier ? aliasDocuments[row.towards_identity_identifier.trim()] : undefined

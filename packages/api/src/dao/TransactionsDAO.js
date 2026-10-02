@@ -37,7 +37,7 @@ module.exports = class TransactionsDAO {
       return null
     }
 
-    const aliasDocument = row.owner ? await getAliasDocumentForIdentifier(row.owner.trim(), this.sdk) : undefined
+    const aliasDocument = row.owner ? await getAliasDocumentForIdentifier(row.owner.trim(), this.sdk, this.knex) : undefined
 
     const aliases = []
 
@@ -180,7 +180,7 @@ module.exports = class TransactionsDAO {
 
     const owners = rows.filter(row => row.owner).map(row => row.owner.trim())
 
-    const aliasDocuments = await getAliasDocumentForIdentifiers(owners, this.sdk)
+    const aliasDocuments = await getAliasDocumentForIdentifiers(owners, this.sdk, this.knex)
 
     const resultSet = await Promise.all(rows.map(async (row) => {
       const aliasDocument = row.owner ? aliasDocuments[row.owner.trim()] : undefined
@@ -401,7 +401,7 @@ module.exports = class TransactionsDAO {
 
     const owners = rows.filter(row => row.owner).map(row => row.owner.trim())
 
-    const aliasDocuments = await getAliasDocumentForIdentifiers(owners, this.sdk)
+    const aliasDocuments = await getAliasDocumentForIdentifiers(owners, this.sdk, this.knex)
 
     const resultSet = rows.reduce((acc, row) => {
       const aliasDocument = row.owner ? aliasDocuments[row.owner.trim()] : undefined

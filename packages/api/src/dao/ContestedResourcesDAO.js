@@ -118,7 +118,7 @@ module.exports = class ContestedDAO {
 
     const owners = rows.map(row => row.owner.trim())
 
-    const aliasDocuments = await getAliasDocumentForIdentifiers(owners, this.sdk)
+    const aliasDocuments = await getAliasDocumentForIdentifiers(owners, this.sdk, this.knex)
 
     const contenders = await Promise.all(uniqueContenders.map(async (row) => {
       const aliasDocument = aliasDocuments[row.owner.trim()]
@@ -416,7 +416,7 @@ module.exports = class ContestedDAO {
       .filter(row => row.towards_identity_identifier)
       .map(row => row.towards_identity_identifier.trim())
 
-    const aliasDocuments = await getAliasDocumentForIdentifiers(towardsIdentityIdentifiers, this.sdk)
+    const aliasDocuments = await getAliasDocumentForIdentifiers(towardsIdentityIdentifiers, this.sdk, this.knex)
 
     const resultSet = await Promise.all(rows.map(async (row) => {
       const aliasDocument = row.towards_identity_identifier ? aliasDocuments[row.towards_identity_identifier.trim()] : undefined

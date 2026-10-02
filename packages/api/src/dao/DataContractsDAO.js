@@ -7,6 +7,7 @@ const {
   getAliasDocumentForIdentifiers, convertToSqlSafeString
 } = require('../utils')
 const Token = require('../models/Token')
+const { isContractVersionError, getIndexedTokenContract, indexedTokenToModel } = require('../indexedEnrichment')
 const { TokenConfigurationWASM, IdentifierWASM } = require('pshenmic-dpp')
 
 module.exports = class DataContractsDAO {
@@ -266,7 +267,7 @@ module.exports = class DataContractsDAO {
       return null
     }
 
-    const aliasDocument = await getAliasDocumentForIdentifier(row.owner.trim(), this.sdk)
+    const aliasDocument = await getAliasDocumentForIdentifier(row.owner.trim(), this.sdk, this.knex)
 
     const ownerAliases = []
 
@@ -279,7 +280,7 @@ module.exports = class DataContractsDAO {
     if (row.owner === row.top_identity || !row.top_identity) {
       topIdentityAliases = ownerAliases
     } else if (row.top_identity) {
-      const aliasDocument = await getAliasDocumentForIdentifier(row.top_identity.trim(), this.sdk)
+      const aliasDocument = await getAliasDocumentForIdentifier(row.top_identity.trim(), this.sdk, this.knex)
 
       if (aliasDocument) {
         topIdentityAliases.push(getAliasFromDocument(aliasDocument))
@@ -334,7 +335,10 @@ module.exports = class DataContractsDAO {
         })
       }))
     } catch (error) {
-      console.error(error)
+      if (!isContractVersionError(error)) throw error
+      const contract = await getIndexedTokenContract(this.knex, identifier, decodeStateTransition)
+      groups = contract.groups.map(group => ({ group }))
+      tokens = await Promise.all(contract.tokens.map(config => indexedTokenToModel(contract, config, row, ownerAliases, this.sdk)))
     }
 
     return DataContract.fromObject({
@@ -368,7 +372,7 @@ module.exports = class DataContractsDAO {
 
     const owners = rows.map(row => row.owner.trim())
 
-    const aliasDocuments = await getAliasDocumentForIdentifiers(owners, this.sdk)
+    const aliasDocuments = await getAliasDocumentForIdentifiers(owners, this.sdk, this.knex)
 
     const resultSet = await Promise.all(rows.map(async (row) => {
       let decodedTx

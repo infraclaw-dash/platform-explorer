@@ -79,7 +79,7 @@ module.exports = class BlockDAO {
       .filter(row => row.owner)
       .map(row => row.owner.trim())
 
-    const aliasDocuments = await getAliasDocumentForIdentifiers(owners, this.sdk)
+    const aliasDocuments = await getAliasDocumentForIdentifiers(owners, this.sdk, this.knex)
 
     const txs = block.tx_hash
       ? await Promise.all(rows.map(async (row) => {
