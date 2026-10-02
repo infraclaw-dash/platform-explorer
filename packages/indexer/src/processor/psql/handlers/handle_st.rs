@@ -148,14 +148,13 @@ impl PSQLProcessor {
         }
 
         match state_transition {
-            StateTransition::ShieldFromIdentity(_)
-            | StateTransition::IdentityTopUpFromShieldedPool(_) => {
-                return Err(ProcessorError::TransactionError {
-                    height: block_height,
-                    index: index as usize,
-                    stage: "handler compatibility",
-                    detail: format!("state transition type {st_type} has no complete Explorer projection; refusing to advance"),
-                });
+            StateTransition::ShieldFromIdentity(st) => {
+                let dpp::state_transition::shield_from_identity_transition::ShieldFromIdentityTransition::V0(st) = st;
+                self.handle_identity_shielded_amount(st.identity_id, st.amount, None, st_hash.clone(), block_height, index as usize, sql_transaction).await?;
+            }
+            StateTransition::IdentityTopUpFromShieldedPool(st) => {
+                let dpp::state_transition::identity_top_up_from_shielded_pool_transition::IdentityTopUpFromShieldedPoolTransition::V0(st) = st;
+                self.handle_identity_shielded_amount(st.identity_id, st.top_up_amount, Some(st.actions.len()), st_hash.clone(), block_height, index as usize, sql_transaction).await?;
             }
             StateTransition::ContractUserModeration(st) => {
                 self.handle_contract_moderation(st, st_hash.clone(), block_height, index as usize, sql_transaction).await?;
