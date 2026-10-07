@@ -14,6 +14,7 @@ const {
 const StateTransitionEnum = require('../enums/StateTransitionEnum')
 const BatchEnum = require('../enums/BatchEnum')
 const SeriesData = require('../models/SeriesData')
+const { readVerifiedIdentity } = require('../verifiedIdentity')
 
 module.exports = class IdentitiesDAO {
   constructor (knex, sdk) {
@@ -168,7 +169,8 @@ module.exports = class IdentitiesDAO {
       return getAliasStateByVote(aliasInfo, alias, identifier)
     }))
 
-    const publicKeys = await this.sdk.identities.getIdentityPublicKeys(identity.identifier)
+    const verified = await readVerifiedIdentity(identity.identifier)
+    const publicKeys = verified ? null : await this.sdk.identities.getIdentityPublicKeys(identity.identifier)
 
     let fundingCoreTx = null
 
@@ -178,8 +180,8 @@ module.exports = class IdentitiesDAO {
       fundingCoreTx = assetLockProof?.fundingCoreTx
     }
 
-    const identityNonce = await this.sdk.identities.getIdentityNonce(identity.identifier)
-    const identityInfo = await this.sdk.identities.getIdentityByIdentifier(identity.identifier)
+    const identityNonce = verified ? verified.nonce : await this.sdk.identities.getIdentityNonce(identity.identifier)
+    const identityInfo = verified ? verified.identityInfo : await this.sdk.identities.getIdentityByIdentifier(identity.identifier)
 
     return Identity.fromObject({
       ...identity,
@@ -191,27 +193,29 @@ module.exports = class IdentitiesDAO {
       balance: String(identityInfo.balance),
       nonce: String(identityNonce),
       revision: String(identityInfo.revision),
-      publicKeys: publicKeys?.map(key => {
-        const contractBounds = key.getContractBounds()
+      publicKeys: verified
+        ? verified.publicKeys
+        : publicKeys?.map(key => {
+          const contractBounds = key.getContractBounds()
 
-        return {
-          keyId: key.keyId,
-          keyType: key.keyType,
-          raw: key.hex(),
-          data: key.data,
-          purpose: key.purpose,
-          securityLevel: key.securityLevel,
-          readOnly: key.readOnly,
-          publicKeyHash: key.getPublicKeyHash(),
-          contractBounds: contractBounds
-            ? {
-                identifier: contractBounds.identifier.base58(),
-                documentTypeName: contractBounds.documentTypeName ?? null
-              }
-            : null,
-          disabledAt: key.disabledAt?.toString() ?? null
-        }
-      }),
+          return {
+            keyId: key.keyId,
+            keyType: key.keyType,
+            raw: key.hex(),
+            data: key.data,
+            purpose: key.purpose,
+            securityLevel: key.securityLevel,
+            readOnly: key.readOnly,
+            publicKeyHash: key.getPublicKeyHash(),
+            contractBounds: contractBounds
+              ? {
+                  identifier: contractBounds.identifier.base58(),
+                  documentTypeName: contractBounds.documentTypeName ?? null
+                }
+              : null,
+            disabledAt: key.disabledAt?.toString() ?? null
+          }
+        }),
       fundingCoreTx
     })
   }
