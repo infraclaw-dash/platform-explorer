@@ -153,6 +153,32 @@ fn changed_properties(
     Ok(Value::Object(data))
 }
 
+// A restore needs the target document's byte layout, not the indexes of every
+// other document type in its contract. Retain its complete schema, shared
+// definitions, config and tokens; only narrow this temporary decoder input.
+// The original contract transition and full Explorer schema remain untouched.
+fn restore_document_contract(
+    mut format: dpp::data_contract::serialized_version::DataContractInSerializationFormat,
+    document_type_name: &str,
+    version: &dpp::version::PlatformVersion,
+) -> Result<dpp::data_contract::DataContract, String> {
+    if !format.document_schemas().contains_key(document_type_name) {
+        return Err(format!(
+            "missing restore document type {document_type_name}"
+        ));
+    }
+    format
+        .document_schemas_mut()
+        .retain(|name, _| name == document_type_name);
+    dpp::data_contract::DataContract::try_from_platform_versioned(
+        format,
+        false,
+        &mut vec![],
+        version,
+    )
+    .map_err(|e| format!("restore document contract: {e}"))
+}
+
 // Latest row is ordered by insertion, never by revision: deletes have nullable
 // revisions and a restored document may have a lower revision than its history.
 // Contract and document type are always part of the lookup key.
@@ -338,13 +364,7 @@ impl PSQLProcessor {
                     _ => return Err("contract row does not reference a contract transition".into()),
                 };
                 let version = dpp::version::PlatformVersion::get(14).map_err(|e| e.to_string())?;
-                let full_contract = dpp::data_contract::DataContract::try_from_platform_versioned(
-                    format,
-                    false,
-                    &mut vec![],
-                    version,
-                )
-                .map_err(|e| e.to_string())?;
+                let full_contract = restore_document_contract(format, document_type_name, version)?;
                 let document_type = full_contract
                     .document_type_for_name(document_type_name)
                     .map_err(|e| e.to_string())?;
@@ -402,6 +422,105 @@ impl PSQLProcessor {
 mod tests {
     use super::*;
     use dpp::data_contract::config::moderation::ContractModerationReason;
+
+    #[tokio::test]
+    async fn actual_restore_5332_ignores_unrelated_index_grammar_without_losing_document() {
+        use dpp::serialization::PlatformSerializable;
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/sakura-restore-5332.json"
+        ))
+        .unwrap();
+        let decoder = crate::decoder::decoder::StateTransitionDecoder::new();
+        let bytes = STANDARD
+            .decode(fixture["txBase64"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(sha256::digest(&bytes).to_uppercase(), fixture["txSha256"]);
+        let decoded = decoder.decode(bytes.clone()).await.unwrap();
+        assert_eq!(decoded.serialize_to_bytes().unwrap(), bytes);
+        let StateTransition::ContractUserModeration(ContractUserModerationTransition::V0(st)) =
+            decoded
+        else {
+            panic!("expected moderation transition");
+        };
+        assert_eq!(st.data_contract_id.to_string(Base58), fixture["contractId"]);
+        let Action::RestoreDocument {
+            document_type_name,
+            document,
+        } = st.action
+        else {
+            panic!("expected restore");
+        };
+        assert_eq!(document_type_name, "post");
+        let contract_bytes = STANDARD
+            .decode(fixture["contractTransitionBase64"].as_str().unwrap())
+            .unwrap();
+        let contract_transition = decoder.decode(contract_bytes.clone()).await.unwrap();
+        assert_eq!(
+            contract_transition.serialize_to_bytes().unwrap(),
+            contract_bytes
+        );
+        let format = match contract_transition {
+            StateTransition::DataContractCreate(dpp::state_transition::data_contract_create_transition::DataContractCreateTransition::V1(v)) => v.data_contract,
+            _ => panic!("expected retained contract create v1"),
+        };
+        let original_format = format.clone();
+        let version = dpp::version::PlatformVersion::get(14).unwrap();
+        // The old production path fails on `like`'s summableOffCountIndex,
+        // although the restored `post` schema itself is supported unchanged.
+        let old_error = dpp::data_contract::DataContract::try_from_platform_versioned(
+            format.clone(),
+            false,
+            &mut vec![],
+            version,
+        )
+        .unwrap_err();
+        assert!(old_error.to_string().contains("unexpected property name"));
+        assert!(
+            restore_document_contract(format.clone(), "missing-type", version)
+                .unwrap_err()
+                .contains("missing restore document type")
+        );
+        let contract =
+            restore_document_contract(format.clone(), &document_type_name, version).unwrap();
+        assert_eq!(
+            format, original_format,
+            "retained contract must stay unchanged"
+        );
+        let document_type = contract
+            .document_type_for_name(&document_type_name)
+            .unwrap();
+        let restored =
+            dpp::document::Document::from_bytes(document.as_slice(), document_type, version)
+                .unwrap();
+        assert_eq!(
+            restored.id().to_string(Base58),
+            "CSK1tnMLbqonFyHnox9FvGcFjFqSCRMr4AHwZZQk5Fby"
+        );
+        assert_eq!(
+            restored.owner_id().to_string(Base58),
+            "GtZu3frUm7Dg78T3hxQrTpmyczMvuMQEmo2pNe7ZWmtU"
+        );
+        assert_eq!(restored.revision(), Some(1));
+        assert_eq!(
+            serde_json::to_value(restored.properties()).unwrap(),
+            json!({
+                "content": "to be removed and restored", "live": true
+            })
+        );
+        assert_eq!(
+            restored
+                .serialize(document_type, &contract, version)
+                .unwrap(),
+            document.as_slice(),
+            "complete restored document must round-trip byte-for-byte"
+        );
+        assert!(
+            dpp::document::Document::from_bytes(&document.as_slice()[..20], document_type, version)
+                .is_err(),
+            "malformed restored bytes must still fail"
+        );
+    }
+
     #[tokio::test]
     async fn actual_moderation_fixtures_decode_losslessly_and_preserve_unknown_outcomes() {
         use dpp::serialization::PlatformSerializable;
@@ -436,7 +555,10 @@ mod tests {
                     direct += 1;
                 }
                 709 | 710 => {
-                    assert!(matches!(st.action, Action::DeleteSettledDocument { .. } | Action::ApproveTeamAction { .. }));
+                    assert!(matches!(
+                        st.action,
+                        Action::DeleteSettledDocument { .. } | Action::ApproveTeamAction { .. }
+                    ));
                     let outcome = projection_outcome(&st.action);
                     assert_eq!(outcome["status"], "unavailable");
                     assert!(outcome["documentDeleted"].is_null());
