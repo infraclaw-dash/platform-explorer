@@ -1,0 +1,12 @@
+{
+  "source": "Sakura public block 6681, transaction index 1, captured 2026-10-07",
+  "height": 6681,
+  "transactionIndex": 1,
+  "blockHash": "E48FE6FB918805EC65FF756D5C37168A21BE4867AC11342A487775C0B0DBC7B6",
+  "txBase64": "GADIhK1EBvHvCJgsJOLOcPEjUWuJPTj2PJuF+VfSygsDgV/4jlyWOLDitD5LY8r44cVZG95945FalVwbTZknuTu+DgSj6HwhGOEkFpBrSA3FFs3ZNsnfmhU1nUgg/4+8RHhHKwAIb2RkIG5hbWUBC2EgYgDwn5KlLy4uFrPHeLw0LSt/Q1ezZDd0Q9untNNbxUd7kC0x8bFq/UMAAAFBIDdH/JnRtUfUCCn2HY3dISbGNJ90ZgXjdAOje/sWFoA6flbBGUkdyzfRyNySPayr7CXCyTK38xxTJYx0FX2MFqE=",
+  "txSha256": "5D6B306FD924921770C0E76D000AD0BC0A236A169317A4DF0B8E1691318ABA04",
+  "result": {
+    "gas_used": 9762080
+  },
+  "expectedReasonDocumentTypeName": "a b\u0000\ud83d\udca5/.."
+}

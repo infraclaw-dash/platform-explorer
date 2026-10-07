@@ -423,6 +423,197 @@ mod tests {
     use super::*;
     use dpp::data_contract::config::moderation::ContractModerationReason;
 
+    async fn actual_unicode_6681_projection() -> (Value, Value) {
+        use dpp::serialization::PlatformSerializable;
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../../../tests/fixtures/sakura-moderation-6681.json"
+        ))
+        .unwrap();
+        let result: crate::models::TDTxResult =
+            serde_json::from_value(fixture["result"].clone()).unwrap();
+        assert_eq!(
+            result.code.unwrap_or(0),
+            0,
+            "this action succeeded on chain"
+        );
+        let bytes = STANDARD
+            .decode(fixture["txBase64"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(sha256::digest(&bytes).to_uppercase(), fixture["txSha256"]);
+        let decoder = crate::decoder::decoder::StateTransitionDecoder::new();
+        let decoded = decoder.decode(bytes.clone()).await.unwrap();
+        assert_eq!(decoded.serialize_to_bytes().unwrap(), bytes);
+        let StateTransition::ContractUserModeration(ContractUserModerationTransition::V0(st)) =
+            decoded
+        else {
+            panic!("expected moderation transition");
+        };
+        assert!(matches!(&st.action, Action::Warn { .. }));
+        let action = action_json(&st.action);
+        assert_eq!(action["reason"]["text"], "odd name");
+        assert_eq!(
+            action["reason"]["documents"][0]["documentTypeName"],
+            fixture["expectedReasonDocumentTypeName"]
+        );
+        assert!(action["reason"]["documents"][0]["documentTypeName"]
+            .as_str()
+            .unwrap()
+            .contains('\0'));
+        let state = identity_effect(
+            json!({}),
+            &st.action,
+            1791358527328,
+            &st.owner_id.to_string(Base58),
+        )
+        .unwrap();
+        assert_eq!(state["warnings"][0]["reason"], action["reason"]);
+        assert_eq!(
+            serde_json::from_str::<Value>(&serde_json::to_string(&action).unwrap()).unwrap(),
+            action
+        );
+        assert_eq!(
+            serde_json::from_str::<Value>(&serde_json::to_string(&state).unwrap()).unwrap(),
+            state
+        );
+        (action, state)
+    }
+
+    #[tokio::test]
+    async fn actual_successful_warning_6681_preserves_unicode_and_wire_bytes() {
+        actual_unicode_6681_projection().await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires explicit PE_UNICODE_TEST_DATABASE_URL for disposable pe_c0cf08_unicode_test database"]
+    async fn postgres_moderation_unicode_migration_preserves_old_and_actual_values() {
+        let config: tokio_postgres::Config = std::env::var("PE_UNICODE_TEST_DATABASE_URL")
+            .expect("explicit disposable database URL required")
+            .parse()
+            .unwrap();
+        assert_eq!(config.get_dbname(), Some("pe_c0cf08_unicode_test"));
+        let (mut client, connection) = config.connect(tokio_postgres::NoTls).await.unwrap();
+        let connection_task = tokio::spawn(async move { connection.await.unwrap() });
+        let (action, state) = actual_unicode_6681_projection().await;
+        for value in [&action, &state] {
+            let error = client
+                .query_one("SELECT $1::jsonb", &[value])
+                .await
+                .unwrap_err();
+            let db_error = error
+                .as_db_error()
+                .expect("old storage rejects real U+0000");
+            assert_eq!(db_error.code().code(), "22P05");
+            assert!(db_error
+                .detail()
+                .unwrap()
+                .contains("\\u0000 cannot be converted to text"));
+        }
+        let tx = client.transaction().await.unwrap();
+        // Use transaction-local temporary tables only. The exact production
+        // migration must never resolve to persistent tables in this test.
+        tx.batch_execute("SET LOCAL search_path TO pg_temp, pg_catalog;
+            CREATE TEMP TABLE contract_moderation_events (id integer PRIMARY KEY, action jsonb NOT NULL) ON COMMIT DROP;
+            CREATE TEMP TABLE contract_moderation_identity_state (id integer PRIMARY KEY, state jsonb NOT NULL) ON COMMIT DROP;
+            CREATE INDEX unicode_event_id ON contract_moderation_events(id);").await.unwrap();
+        let old_action = json!({"type":"warn","reason":{"text":"previous","code":null}});
+        let old_state = json!({"warnings":[{"reason":{"text":"previous","code":null}}]});
+        tx.execute(
+            "INSERT INTO contract_moderation_events VALUES (1,$1)",
+            &[&old_action],
+        )
+        .await
+        .unwrap();
+        tx.execute(
+            "INSERT INTO contract_moderation_identity_state VALUES (1,$1)",
+            &[&old_state],
+        )
+        .await
+        .unwrap();
+        tx.batch_execute(include_str!(
+            "../../../../migrations/V83__preserve_moderation_unicode.sql"
+        ))
+        .await
+        .unwrap();
+        tx.execute(
+            "INSERT INTO contract_moderation_events VALUES (2,$1)",
+            &[&action],
+        )
+        .await
+        .unwrap();
+        tx.execute(
+            "INSERT INTO contract_moderation_identity_state VALUES (2,$1)",
+            &[&state],
+        )
+        .await
+        .unwrap();
+        for (table, column, expected) in [
+            (
+                "contract_moderation_events",
+                "action",
+                [&old_action, &action],
+            ),
+            (
+                "contract_moderation_identity_state",
+                "state",
+                [&old_state, &state],
+            ),
+        ] {
+            let rows = tx
+                .query(
+                    &format!("SELECT {column}, pg_typeof({column})::text FROM {table} ORDER BY id"),
+                    &[],
+                )
+                .await
+                .unwrap();
+            assert_eq!(rows.len(), 2);
+            for (row, expected) in rows.iter().zip(expected) {
+                assert_eq!(&row.get::<_, Value>(0), expected);
+                assert_eq!(row.get::<_, String>(1), "json");
+            }
+        }
+        let indexes: i64 = tx.query_one("SELECT count(*) FROM pg_index WHERE indrelid IN ('contract_moderation_events'::regclass, 'contract_moderation_identity_state'::regclass) AND indisvalid", &[]).await.unwrap().get(0);
+        assert_eq!(indexes, 3, "primary and ordinary indexes remain valid");
+        // Subsequent warnings must read and retain the NUL-containing reason.
+        let retained: Value = tx
+            .query_one(
+                "SELECT state FROM contract_moderation_identity_state WHERE id=2",
+                &[],
+            )
+            .await
+            .unwrap()
+            .get(0);
+        let next = identity_effect(
+            retained,
+            &Action::Warn {
+                identity_id: Identifier::default(),
+                reason: ContractModerationReason::from_text("later"),
+            },
+            1791358528000,
+            "moderator",
+        )
+        .unwrap();
+        tx.execute(
+            "UPDATE contract_moderation_identity_state SET state=$1 WHERE id=2",
+            &[&next],
+        )
+        .await
+        .unwrap();
+        let roundtrip: Value = tx
+            .query_one(
+                "SELECT state FROM contract_moderation_identity_state WHERE id=2",
+                &[],
+            )
+            .await
+            .unwrap()
+            .get(0);
+        assert_eq!(roundtrip, next);
+        assert_eq!(roundtrip["warnings"][0], state["warnings"][0]);
+        assert_eq!(roundtrip["warnings"].as_array().unwrap().len(), 2);
+        tx.rollback().await.unwrap();
+        drop(client);
+        connection_task.await.unwrap();
+    }
+
     #[tokio::test]
     async fn actual_restore_5332_ignores_unrelated_index_grammar_without_losing_document() {
         use dpp::serialization::PlatformSerializable;
