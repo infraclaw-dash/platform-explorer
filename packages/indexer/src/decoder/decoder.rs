@@ -35,6 +35,101 @@ mod tests {
     use dpp::state_transition::batch_transition::BatchTransition;
 
     #[tokio::test]
+    async fn sakura_tail_7392_through_7505_preserves_every_wire_transaction() {
+        let fixtures: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/sakura-tail-7392-7505.json"
+        ))
+        .unwrap();
+        let fixtures = fixtures.as_array().unwrap();
+        assert_eq!(fixtures.len(), 116);
+        for fixture in fixtures {
+            let height = fixture["height"].as_i64().unwrap() as i32;
+            let index = fixture["index"].as_u64().unwrap() as usize;
+            let encoded = fixture["txBase64"].as_str().unwrap();
+            let bytes = STANDARD.decode(encoded).unwrap();
+            assert_eq!(sha256::digest(&bytes).to_uppercase(), fixture["txSha256"]);
+            let transition =
+                decode_block_transaction(&StateTransitionDecoder::new(), encoded, height, index)
+                    .await
+                    .unwrap();
+            assert_eq!(
+                transition.serialize_to_bytes().unwrap(),
+                bytes,
+                "wire data at {height}/{index}"
+            );
+            let result: crate::models::TDTxResult =
+                serde_json::from_value(fixture["result"].clone()).unwrap();
+            println!(
+                "captured {height}/{index} code={} transition={}",
+                result.code.unwrap_or(0),
+                transition.state_transition_type()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn sakura_7392_token_configuration_v1_preserves_pool_and_wire_bytes() {
+        use dpp::data_contract::associated_token::token_configuration::accessors::v0::TokenConfigurationV0Getters;
+        use dpp::data_contract::associated_token::token_configuration_convention::accessors::v0::TokenConfigurationConventionV0Getters;
+        use dpp::data_contract::associated_token::token_configuration_localization::accessors::v0::TokenConfigurationLocalizationV0Getters;
+        use dpp::data_contract::TokenConfiguration;
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/sakura-token-config-7392.json"
+        ))
+        .unwrap();
+        let result: crate::models::TDTxResult =
+            serde_json::from_value(fixture["result"].clone()).unwrap();
+        assert_eq!(
+            result.code.unwrap_or(0),
+            0,
+            "contract creation succeeded on chain"
+        );
+        let encoded = fixture["txBase64"].as_str().unwrap();
+        let bytes = STANDARD.decode(encoded).unwrap();
+        assert_eq!(sha256::digest(&bytes).to_uppercase(), fixture["txSha256"]);
+        let decoded = decode_block_transaction(&StateTransitionDecoder::new(), encoded, 7392, 0)
+            .await
+            .unwrap();
+        assert_eq!(decoded.serialize_to_bytes().unwrap(), bytes);
+        let StateTransition::DataContractCreate(transition) = decoded else {
+            panic!("expected data contract creation");
+        };
+        // The production conversion must retain the complete token configuration,
+        // including V1 fields, rather than coerce it to the old V0 representation.
+        let contract = crate::entities::data_contract::DataContract::from(transition);
+        let tokens = contract.tokens.unwrap();
+        assert_eq!(tokens.len(), 1);
+        let token = tokens.get(&0).unwrap();
+        let TokenConfiguration::V1(pool) = token else {
+            panic!("expected V1 token configuration");
+        };
+        assert!(pool.has_shielded_pool);
+        assert_eq!(token.base_supply(), 1_000_000);
+        assert_eq!(
+            token
+                .conventions()
+                .localizations()
+                .get("en")
+                .unwrap()
+                .singular_form(),
+            "qapool"
+        );
+        assert_eq!(
+            token
+                .conventions()
+                .localizations()
+                .get("en")
+                .unwrap()
+                .plural_form(),
+            "qapools"
+        );
+        let json = serde_json::to_value(token).unwrap();
+        assert_eq!(json["$formatVersion"], "1");
+        assert_eq!(json["hasShieldedPool"], true);
+        assert!(contract.schema.unwrap().get("n").is_some());
+    }
+
+    #[tokio::test]
     async fn sakura_block_325_decodes_v2_and_preserves_transaction_and_document() {
         let fixture: serde_json::Value =
             serde_json::from_str(include_str!("../../tests/fixtures/sakura-block-325.json"))

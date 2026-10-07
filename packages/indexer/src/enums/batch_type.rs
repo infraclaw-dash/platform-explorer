@@ -20,6 +20,13 @@ pub enum BatchType {
     TokenSetPriceForDirectPurchaseTransition,
     // Append-only: existing database discriminants must never shift.
     DocumentIndexOnlyDeleteTransition,
+    TokenShieldTransition,
+    TokenUnshieldTransition,
+    TokenShieldedTransferTransition,
+    TokenMintToPoolTransition,
+    TokenBurnFromPoolTransition,
+    TokenClaimToPoolTransition,
+    TokenDirectPurchaseToPoolTransition,
 }
 
 impl fmt::Display for BatchType {
@@ -45,6 +52,13 @@ impl fmt::Display for BatchType {
             BatchType::TokenSetPriceForDirectPurchaseTransition => {
                 "TOKEN_SET_PRICE_FOR_DIRECT_PURCHASE"
             }
+            BatchType::TokenShieldTransition => "TOKEN_SHIELD",
+            BatchType::TokenUnshieldTransition => "TOKEN_UNSHIELD",
+            BatchType::TokenShieldedTransferTransition => "TOKEN_SHIELDED_TRANSFER",
+            BatchType::TokenMintToPoolTransition => "TOKEN_MINT_TO_POOL",
+            BatchType::TokenBurnFromPoolTransition => "TOKEN_BURN_FROM_POOL",
+            BatchType::TokenClaimToPoolTransition => "TOKEN_CLAIM_TO_POOL",
+            BatchType::TokenDirectPurchaseToPoolTransition => "TOKEN_DIRECT_PURCHASE_TO_POOL",
         };
 
         write!(f, "{batch_type_string}")

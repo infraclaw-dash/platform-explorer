@@ -15,6 +15,43 @@ use dpp::state_transition::batch_transition::token_transfer_transition::v0::v0_m
 use dpp::state_transition::batch_transition::token_unfreeze_transition::v0::v0_methods::TokenUnfreezeTransitionV0Methods;
 use crate::processor::psql::PSQLProcessor;
 
+/// Public token-pool fields only. Private transfer amounts and claim outcomes
+/// are not observable from the signed transition and must remain unknown.
+fn pool_token_projection(
+    transition: &TokenTransition,
+) -> Option<(Option<u64>, Option<String>, Option<Identifier>)> {
+    use dpp::state_transition::batch_transition::batched_transition::{
+        token_burn_from_pool_transition::TokenBurnFromPoolTransition,
+        token_claim_to_pool_transition::TokenClaimToPoolTransition,
+        token_direct_purchase_to_pool_transition::TokenDirectPurchaseToPoolTransition,
+        token_mint_to_pool_transition::TokenMintToPoolTransition,
+        token_shield_transition::TokenShieldTransition,
+        token_unshield_transition::TokenUnshieldTransition,
+    };
+    match transition {
+        TokenTransition::Shield(TokenShieldTransition::V0(st)) => {
+            Some((Some(st.amount), None, None))
+        }
+        TokenTransition::Unshield(TokenUnshieldTransition::V0(st)) => {
+            Some((Some(st.amount), None, Some(st.recipient_id)))
+        }
+        TokenTransition::ShieldedTransfer(_) => Some((None, None, None)),
+        TokenTransition::MintToPool(TokenMintToPoolTransition::V0(st)) => {
+            Some((Some(st.amount), st.public_note.clone(), None))
+        }
+        TokenTransition::BurnFromPool(TokenBurnFromPoolTransition::V0(st)) => {
+            Some((Some(st.amount), st.public_note.clone(), None))
+        }
+        TokenTransition::ClaimToPool(TokenClaimToPoolTransition::V0(st)) => {
+            Some((None, st.public_note.clone(), None))
+        }
+        TokenTransition::DirectPurchaseToPool(TokenDirectPurchaseToPoolTransition::V0(st)) => {
+            Some((Some(st.token_count), None, None))
+        }
+        _ => None,
+    }
+}
+
 impl PSQLProcessor {
     pub async fn handle_token_transition(
         &self,
@@ -38,6 +75,39 @@ impl PSQLProcessor {
             .unwrap();
 
         match transition.clone() {
+            TokenTransition::Shield(_)
+            | TokenTransition::Unshield(_)
+            | TokenTransition::ShieldedTransfer(_)
+            | TokenTransition::MintToPool(_)
+            | TokenTransition::BurnFromPool(_)
+            | TokenTransition::ClaimToPool(_)
+            | TokenTransition::DirectPurchaseToPool(_) => {
+                let (amount, note, recipient) = pool_token_projection(&transition).unwrap();
+                // Preserve action discriminant/token link and all original proof
+                // bytes in the enclosing state transition, as for existing tokens.
+                self.dao
+                    .token_transition(
+                        transition.clone(),
+                        amount,
+                        note.as_ref(),
+                        owner_id,
+                        recipient,
+                        st_hash.clone(),
+                        sql_transaction,
+                    )
+                    .await
+                    .unwrap();
+                if let Some(recipient) = recipient {
+                    self.dao
+                        .token_holder(recipient, transition.token_id(), sql_transaction)
+                        .await
+                        .unwrap();
+                    self.dao
+                        .set_state_transition_recipient(recipient, st_hash.clone(), sql_transaction)
+                        .await
+                        .unwrap();
+                }
+            }
             TokenTransition::Mint(mint) => {
                 self.dao
                     .token_transition(
@@ -242,5 +312,42 @@ impl PSQLProcessor {
                 .await
                 .unwrap(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use dpp::state_transition::batch_transition::batched_transition::{
+        token_claim_to_pool_transition::TokenClaimToPoolTransition,
+        token_shielded_transfer_transition::TokenShieldedTransferTransition,
+        token_unshield_transition::{TokenUnshieldTransition, TokenUnshieldTransitionV0},
+    };
+
+    #[test]
+    fn token_pool_projection_distinguishes_public_values_from_hidden_amounts() {
+        let recipient = Identifier::new([9; 32]);
+        let unshield =
+            TokenTransition::Unshield(TokenUnshieldTransition::V0(TokenUnshieldTransitionV0 {
+                amount: 123,
+                recipient_id: recipient,
+                ..Default::default()
+            }));
+        assert_eq!(
+            pool_token_projection(&unshield),
+            Some((Some(123), None, Some(recipient)))
+        );
+        assert_eq!(
+            pool_token_projection(&TokenTransition::ShieldedTransfer(
+                TokenShieldedTransferTransition::default()
+            )),
+            Some((None, None, None))
+        );
+        assert_eq!(
+            pool_token_projection(&TokenTransition::ClaimToPool(
+                TokenClaimToPoolTransition::default()
+            )),
+            Some((None, None, None))
+        );
     }
 }

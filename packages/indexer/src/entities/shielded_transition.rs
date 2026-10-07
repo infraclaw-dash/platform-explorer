@@ -73,6 +73,7 @@ impl ShieldedTransition {
 
         let amount = match transition {
             ShieldFromAssetLockTransition::V0(v0) => v0.value_balance,
+            ShieldFromAssetLockTransition::V1(v1) => v1.value_balance,
         };
 
         ShieldedTransition {

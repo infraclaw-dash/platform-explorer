@@ -656,16 +656,17 @@ mod tests {
         };
         let original_format = format.clone();
         let version = dpp::version::PlatformVersion::get(14).unwrap();
-        // The old production path fails on `like`'s summableOffCountIndex,
-        // although the restored `post` schema itself is supported unchanged.
-        let old_error = dpp::data_contract::DataContract::try_from_platform_versioned(
+        // Published beta.2 also understands the formerly unsupported `like`
+        // summableOffCountIndex. Keep testing the scoped restore helper below:
+        // its complete target schema and retained source must remain unchanged.
+        let full_contract = dpp::data_contract::DataContract::try_from_platform_versioned(
             format.clone(),
             false,
             &mut vec![],
             version,
         )
-        .unwrap_err();
-        assert!(old_error.to_string().contains("unexpected property name"));
+        .unwrap();
+        assert!(full_contract.document_type_for_name("like").is_ok());
         assert!(
             restore_document_contract(format.clone(), "missing-type", version)
                 .unwrap_err()

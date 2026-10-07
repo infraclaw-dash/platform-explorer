@@ -81,6 +81,23 @@ impl PSQLProcessor {
                         }
                     },
                     BatchedTransition::Token(token_transition) => match token_transition {
+                        TokenTransition::Shield(_) => Some(BatchType::TokenShieldTransition),
+                        TokenTransition::Unshield(_) => Some(BatchType::TokenUnshieldTransition),
+                        TokenTransition::ShieldedTransfer(_) => {
+                            Some(BatchType::TokenShieldedTransferTransition)
+                        }
+                        TokenTransition::MintToPool(_) => {
+                            Some(BatchType::TokenMintToPoolTransition)
+                        }
+                        TokenTransition::BurnFromPool(_) => {
+                            Some(BatchType::TokenBurnFromPoolTransition)
+                        }
+                        TokenTransition::ClaimToPool(_) => {
+                            Some(BatchType::TokenClaimToPoolTransition)
+                        }
+                        TokenTransition::DirectPurchaseToPool(_) => {
+                            Some(BatchType::TokenDirectPurchaseToPoolTransition)
+                        }
                         TokenTransition::Burn(_) => Some(BatchType::TokenBurnTransition),
                         TokenTransition::Mint(_) => Some(BatchType::TokenMintTransition),
                         TokenTransition::Transfer(_) => Some(BatchType::TokenTransferTransition),
@@ -148,22 +165,73 @@ impl PSQLProcessor {
         }
 
         match state_transition {
+            StateTransition::TokenShieldedTransferWithShieldedFee(_)
+            | StateTransition::TokenUnshieldWithShieldedFee(_)
+            | StateTransition::TokenPurchaseFromShieldedPool(_) => {
+                // No such successful transition occurs in the captured replay.
+                // Fail atomically if one arrives; never invent a projection or skip it.
+                return Err(ProcessorError::TransactionError {
+                    height: block_height,
+                    index: index as usize,
+                    stage: "token shielded fee projection",
+                    detail: format!("unsupported successful state transition type {st_type}"),
+                });
+            }
             StateTransition::ShieldFromIdentity(st) => {
                 let dpp::state_transition::shield_from_identity_transition::ShieldFromIdentityTransition::V0(st) = st;
-                self.handle_identity_shielded_amount(st.identity_id, st.amount, None, st_hash.clone(), block_height, index as usize, sql_transaction).await?;
+                self.handle_identity_shielded_amount(
+                    st.identity_id,
+                    st.amount,
+                    None,
+                    st_hash.clone(),
+                    block_height,
+                    index as usize,
+                    sql_transaction,
+                )
+                .await?;
             }
             StateTransition::IdentityTopUpFromShieldedPool(st) => {
                 let dpp::state_transition::identity_top_up_from_shielded_pool_transition::IdentityTopUpFromShieldedPoolTransition::V0(st) = st;
-                self.handle_identity_shielded_amount(st.identity_id, st.top_up_amount, Some(st.actions.len()), st_hash.clone(), block_height, index as usize, sql_transaction).await?;
+                self.handle_identity_shielded_amount(
+                    st.identity_id,
+                    st.top_up_amount,
+                    Some(st.actions.len()),
+                    st_hash.clone(),
+                    block_height,
+                    index as usize,
+                    sql_transaction,
+                )
+                .await?;
             }
             StateTransition::ContractUserModeration(st) => {
-                self.handle_contract_moderation(st, st_hash.clone(), block_height, index as usize, sql_transaction).await?;
+                self.handle_contract_moderation(
+                    st,
+                    st_hash.clone(),
+                    block_height,
+                    index as usize,
+                    sql_transaction,
+                )
+                .await?;
             }
             StateTransition::IdentityKeyLimitsUpdate(st) => {
-                self.handle_identity_key_limits(st, st_hash.clone(), block_height, index as usize, sql_transaction).await?;
+                self.handle_identity_key_limits(
+                    st,
+                    st_hash.clone(),
+                    block_height,
+                    index as usize,
+                    sql_transaction,
+                )
+                .await?;
             }
             StateTransition::ContractFeeClaim(st) => {
-                self.handle_contract_fee_claim(st, st_hash.clone(), block_height, index as usize, sql_transaction).await?;
+                self.handle_contract_fee_claim(
+                    st,
+                    st_hash.clone(),
+                    block_height,
+                    index as usize,
+                    sql_transaction,
+                )
+                .await?;
             }
             StateTransition::DataContractCreate(st) => {
                 self.handle_data_contract_create(st.clone(), st_hash.clone(), sql_transaction)
