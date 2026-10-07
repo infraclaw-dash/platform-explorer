@@ -5,6 +5,51 @@ const { getAliasStateByVote } = require('../../src/utils')
 const fixture = require('./mocks/sakura-identity-key-v1.json')
 
 describe('verified protocol-14 identity reads', () => {
+  it('retries only typed cache misses, at most twice, and never repeats an already-filled hash', async () => {
+    const hashes = ['11'.repeat(32), '22'.repeat(32), '33'.repeat(32)]
+    const miss = hash => ({ kind: 19, message: `context provider error: invalid quorum: Quorum not found in cache for hash: ${hash}` })
+    const scenario = async failures => {
+      let calls = 0
+      let fills = 0
+      let frees = 0
+      const builder = {
+        withVersion () { return this },
+        withTrustedContext () { return this },
+        withProofs (value) { assert.equal(value, true); return this },
+        withSettings () { return this },
+        build () {
+          return {
+            async getIdentityKeys () { const failure = failures[calls++]; if (failure) throw failure; return [] },
+            async getIdentity () { return { balance: 1n, revision: 1n, free () {} } },
+            async getIdentityNonce () { return 2n },
+            free () { frees++ }
+          }
+        }
+      }
+      const reader = createIdentityReader({
+        devnet: 'sakura',
+        addresses: ['https://fixture.invalid'],
+        backfillContext: async () => { fills++; return { free () {} } },
+        loadModule: async () => ({ WasmSdkBuilder: { withAddresses: () => builder }, WasmTrustedContext: { prefetchDevnet: async () => ({ free () {} }) } })
+      })
+      let error
+      try { await reader(fixture.identifier) } catch (e) { error = e }
+      assert.equal(frees, calls)
+      return { calls, fills, error }
+    }
+    assert.deepEqual(await scenario([miss(hashes[0])]), { calls: 2, fills: 1, error: undefined })
+    let handledFreed = 0
+    const handled = { ...miss(hashes[0]), free: () => handledFreed++ }
+    await scenario([handled])
+    assert.equal(handledFreed, 1)
+    const repeated = miss(hashes[0])
+    assert.deepEqual(await scenario([repeated, repeated]), { calls: 2, fills: 1, error: repeated })
+    const third = miss(hashes[2])
+    assert.deepEqual(await scenario([miss(hashes[0]), miss(hashes[1]), third]), { calls: 3, fills: 2, error: third })
+    const proof = { kind: 4, message: 'invalid proof' }
+    assert.deepEqual(await scenario([proof]), { calls: 1, fills: 0, error: proof })
+  })
+
   it('preserves contract-bound key identifiers with the modern SDK accessor', async () => {
     const m = await import('@dashevo/wasm-sdk')
     await m.default()

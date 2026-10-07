@@ -1,6 +1,7 @@
 // Explorer-owned presentation/query adapter; published SDK and proofs are unchanged.
 const { DPNS_CONTRACT } = require('./constants')
 const { convertToHomographSafeChars } = require('./utils')
+const { createQuorumBackfill, missingQuorumHash } = require('./identityQuorumContext')
 
 const readAliasInfo = async (sdk, aliasText) => {
   const [label, domain] = aliasText.split('.')
@@ -39,7 +40,7 @@ const readAliasInfo = async (sdk, aliasText) => {
   }
 }
 
-const createIdentityReader = ({ devnet, addresses, loadModule, now = Date.now }) => {
+const createIdentityReader = ({ devnet, addresses, loadModule, now = Date.now, backfillContext = createQuorumBackfill(devnet) }) => {
   let modulePromise
   let contextPromise
   let contextExpires = 0
@@ -59,9 +60,7 @@ const createIdentityReader = ({ devnet, addresses, loadModule, now = Date.now })
     return contextPromise
   }
 
-  return async (identifier, aliases = []) => {
-    modulePromise ??= loadModule()
-    const m = await modulePromise
+  const readOnce = async (m, identifier, aliases) => {
     const sdk = m.WasmSdkBuilder.withAddresses(addresses, 'devnet')
       .withVersion(14).withTrustedContext(await trustedContext(m)).withProofs(true)
       .withSettings(10000, 15000, 1, false).build()
@@ -86,6 +85,24 @@ const createIdentityReader = ({ devnet, addresses, loadModule, now = Date.now })
       keys?.forEach(key => key.free())
       identity?.free()
       sdk.free()
+    }
+  }
+
+  return async (identifier, aliases = []) => {
+    modulePromise ??= loadModule()
+    const m = await modulePromise
+    const missed = new Set()
+    for (let attempt = 0; ; attempt++) {
+      try { return await readOnce(m, identifier, aliases) } catch (error) {
+        const hash = missingQuorumHash(error)
+        if (!hash || attempt >= 2 || missed.has(hash)) throw error
+        missed.add(hash)
+        const next = await backfillContext(m, hash)
+        error.free?.()
+        context?.free()
+        context = next
+        contextExpires = now() + 60000
+      }
     }
   }
 }

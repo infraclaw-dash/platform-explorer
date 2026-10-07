@@ -100,3 +100,15 @@ and passes the winner/absence state to the existing mapper; it does not need to
 deserialize contender documents merely to determine a vote winner. Proven-empty
 state remains `unknown`; pending/won/locked semantics are unchanged and RPC/proof
 errors propagate. Alias requests are sequential to bound RPC concurrency.
+
+Historical proof quorums can outlive both official four-entry recent lists. Only
+an exact typed quorum-cache-miss may fetch the missing hash from the existing
+loopback Core-backed quorum endpoint (devnet Platform type107). Hash/type/key are
+strictly checked and conflicts with either official list fail closed. The
+unchanged published SDK imports the original official lists plus that verified
+historical key through its documented custom-URL factory; an ephemeral
+127.0.0.1 random-port feed closes in `finally`, with a10-second import bound.
+Upstream HTTP requests have8-second limits. At most two distinct missing hashes
+are filled per identity read, followed by proof-enabled retries; repeated misses
+and all other proof/network errors remain errors. No public route or service
+configuration changes, custom proof implementation or SDK patch are introduced.

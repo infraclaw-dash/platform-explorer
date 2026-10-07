@@ -1,0 +1,44 @@
+{
+  "height": 56400,
+  "type": "llmq_devnet_platform",
+  "quorumHash": "4805de9574a835102fb16c669799b5417d652a5d7121c3bcd6c50d72eabfeaaa",
+  "quorumPublicKey": "995006a0076f16e9d64137c5d14da8a5becbb9b7392386d40037b198dcef17347ec2da8788de42a5be178d871c348a7c",
+  "members": [
+    {
+      "valid": true
+    },
+    {
+      "valid": true
+    },
+    {
+      "valid": true
+    },
+    {
+      "valid": true
+    },
+    {
+      "valid": true
+    },
+    {
+      "valid": true
+    },
+    {
+      "valid": true
+    },
+    {
+      "valid": true
+    },
+    {
+      "valid": true
+    },
+    {
+      "valid": true
+    },
+    {
+      "valid": true
+    },
+    {
+      "valid": true
+    }
+  ]
+}
