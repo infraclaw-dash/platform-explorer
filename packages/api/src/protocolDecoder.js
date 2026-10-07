@@ -92,6 +92,11 @@ const tokenConfig = (sdk, id, position, config) => {
     tradeMode: config.marketplaceRules.tradeMode,
     tradeModeChangeRules: controlRules(config.marketplaceRules.tradeModeChangeRules)
   }
+  if (config.$formatVersion === '1') {
+    out.hasShieldedPool = config.hasShieldedPool
+    out.minimumPoolNotesForOutgoing = config.minimumPoolNotesForOutgoing
+    out.minimumPoolNotesForOutgoingChangeRules = controlRules(config.minimumPoolNotesForOutgoingChangeRules)
+  }
   return out
 }
 
@@ -175,6 +180,7 @@ const decodeProtocolStateTransition = async base64 => {
     const classes = {
       0: 'DataContractCreateTransition',
       1: 'BatchTransition',
+      4: 'DataContractUpdateTransition',
       5: 'IdentityUpdateTransition',
       21: 'ShieldFromIdentityTransition',
       22: 'IdentityTopUpFromShieldedPoolTransition',
@@ -207,12 +213,11 @@ const decodeProtocolStateTransition = async base64 => {
           } finally { wrapper.free() }
         })
       } finally { wrappers.forEach(w => w.free()) }
-    } else if (type === 0) {
+    } else if (type === 0 || type === 4) {
       const contract = json.dataContract
       Object.assign(out, {
         internalConfig: withoutVersion(contract.config),
         version: contract.version,
-        identityNonce: String(json.identityNonce),
         dataContractId: contract.id,
         ownerId: contract.ownerId,
         schema: contract.documentSchemas,
@@ -221,6 +226,12 @@ const decodeProtocolStateTransition = async base64 => {
         contractGroup: json.contractGroup,
         contractGroupMemberships: json.contractGroupMemberships
       })
+      if (type === 0) out.identityNonce = String(json.identityNonce)
+      else {
+        out.identityContractNonce = String(json['$identity-contract-nonce'])
+        out.dataContractOwner = contract.ownerId
+        out.groups = Object.fromEntries(Object.entries(contract.groups ?? {}).map(([position, group]) => [position, { members: group.members, requiredPower: group.requiredPower }]))
+      }
     } else if (type === 5) {
       Object.assign(out, {
         identityNonce: String(json.nonce),

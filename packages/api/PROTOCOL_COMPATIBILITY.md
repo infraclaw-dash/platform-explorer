@@ -1,7 +1,7 @@
 # Protocol-14 decoding adapter — bounded validation, not rollout approval
 
 `protocolDecoder.js` is Explorer presentation code, not a Platform/pshenmic library
-patch. It uses the **unchanged published `@dashevo/wasm-sdk@5.0.0-beta.1`**, pinned
+patch. It uses the **unchanged published `@dashevo/wasm-sdk@5.0.0-beta.2`**, pinned
 exactly in `package.json` and by registry integrity in the API's npm lockfile.
 The API Dockerfile consumes that lockfile with `npm ci`. The monorepo's Yarn
 lockfile is unchanged; install/build this API using its npm lockfile.
@@ -61,7 +61,12 @@ This does not prove all possible protocol variants or historical projections.
 
 - Broadcast and verify controllers still use `pshenmic-dpp`. They are unchanged
   and reject newer wire formats. No broadcast or verification RPC was executed.
-- Network/proof-backed SDK queries still use `dash-platform-sdk` and its legacy
+- With explicit `PROTOCOL_IDENTITY_DEVNET`, identity-detail keys/balance/revision/
+  nonce use the published modern SDK with proofs enabled, explicit devnet and
+  protocol14, and its official devnet trusted quorum context (60-second cache).
+  Otherwise that path is unchanged. Actual Sakura19key regression includes V1
+  budget/expiry and18 old keys with unchanged legacy fields. Other
+  network/proof-backed SDK queries still use `dash-platform-sdk` and its legacy
   proof/contract decoder. Contract/token/identity query compatibility is **not
   established**. The shared state-transition helper used for token price data is
   repaired, but this is not proof that the whole token endpoint works.
@@ -74,3 +79,17 @@ This does not prove all possible protocol variants or historical projections.
 
 All product source, versions, protocol settings, chain state and databases stay
 unchanged. No skip/reset/cleanup workaround is introduced.
+
+## Sakura beta2 captured-tail extension
+
+The npm manifest/lock change is only beta1→beta2 of the published SDK (no
+transitive dependencies). Actual successful block7392 TokenConfigurationV1 now
+decodes, preserving normalized pool enablement/minimum-note controls and complete
+canonical rules. Actual type4 contract updates are mapped with contract identity,
+version, schemas, nonce, tokens and groups. Source tests include both successful
+and failed transactions; presentation does not invent a successful chain result.
+Batch display enum IDs18–24 are appended without renumbering existing IDs.
+These names do not claim support for unseen batch wire variants; unsupported
+presentations still fail explicitly. A read-only corpus check of116 captured
+transactions from7392–7505 passes exact raw preservation and JSON serialization;
+this is a bounded historical corpus, not a perpetual/full-tip compatibility claim.
