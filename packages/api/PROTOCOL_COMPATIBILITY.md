@@ -62,7 +62,7 @@ This does not prove all possible protocol variants or historical projections.
 - Broadcast and verify controllers still use `pshenmic-dpp`. They are unchanged
   and reject newer wire formats. No broadcast or verification RPC was executed.
 - With explicit `PROTOCOL_IDENTITY_DEVNET`, identity-detail keys/balance/revision/
-  nonce use the published modern SDK with proofs enabled, explicit devnet and
+  nonce and contested-alias enrichment use the published modern SDK with proofs enabled, explicit devnet and
   protocol14, and its official devnet trusted quorum context (60-second cache).
   Otherwise that path is unchanged. Actual Sakura19key regression includes V1
   budget/expiry and18 old keys with unchanged legacy fields. Other
@@ -93,3 +93,10 @@ These names do not claim support for unseen batch wire variants; unsupported
 presentations still fail explicitly. A read-only corpus check of116 captured
 transactions from7392–7505 passes exact raw preservation and JSON serialization;
 this is a bounded historical corpus, not a perpetual/full-tip compatibility claim.
+
+Contested aliases retain the existing homograph classification and status mapper.
+The modern query requests `documentsAndVoteTally`, verifies the original proof,
+and passes the winner/absence state to the existing mapper; it does not need to
+deserialize contender documents merely to determine a vote winner. Proven-empty
+state remains `unknown`; pending/won/locked semantics are unchanged and RPC/proof
+errors propagate. Alias requests are sequential to bound RPC concurrency.

@@ -163,13 +163,13 @@ module.exports = class IdentitiesDAO {
 
     const identity = Identity.fromRow(row)
 
-    const aliases = await Promise.all(identity.aliases.map(async alias => {
-      const aliasInfo = await getAliasInfo(alias.alias, this.sdk)
+    const verified = await readVerifiedIdentity(identity.identifier, identity.aliases.map(alias => alias.alias))
+    const aliases = await Promise.all(identity.aliases.map(async (alias, index) => {
+      const aliasInfo = verified ? verified.aliasInfo[index] : await getAliasInfo(alias.alias, this.sdk)
 
       return getAliasStateByVote(aliasInfo, alias, identifier)
     }))
 
-    const verified = await readVerifiedIdentity(identity.identifier)
     const publicKeys = verified ? null : await this.sdk.identities.getIdentityPublicKeys(identity.identifier)
 
     let fundingCoreTx = null

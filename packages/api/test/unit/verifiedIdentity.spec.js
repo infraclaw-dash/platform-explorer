@@ -1,9 +1,59 @@
 const { describe, it } = require('node:test')
 const assert = require('node:assert/strict')
-const { createIdentityReader, formatKey } = require('../../src/verifiedIdentity')
+const { createIdentityReader, formatKey, readAliasInfo } = require('../../src/verifiedIdentity')
+const { getAliasStateByVote } = require('../../src/utils')
 const fixture = require('./mocks/sakura-identity-key-v1.json')
 
 describe('verified protocol-14 identity reads', () => {
+  it('preserves contract-bound key identifiers with the modern SDK accessor', async () => {
+    const m = await import('@dashevo/wasm-sdk')
+    await m.default()
+    const bounds = m.ContractBounds.SingleContractDocumentType(fixture.identifier, 'domain')
+    const key = new m.IdentityPublicKey({ keyId: 20, purpose: 0, securityLevel: 2, keyType: 2, data: new Uint8Array(20), contractBounds: bounds, totalBudget: 20000000000n })
+    try {
+      assert.deepEqual(formatKey(key).contractBounds, { identifier: fixture.identifier, documentTypeName: 'domain' })
+      assert.equal(formatKey(key).totalBudget, '20000000000')
+    } finally { key.free(); bounds.free() }
+  })
+
+  it('retains alias classification and won/pending/locked/unknown statuses without hiding RPC failures', async () => {
+    const m = await import('@dashevo/wasm-sdk')
+    await m.default()
+    let calls = 0
+    let mode = 'pending'
+    let frees = 0
+    const sdk = {
+      async getContestedResourceVoteState (query) {
+        calls++
+        assert.deepEqual(query.indexValues, ['dash', 'b01'])
+        assert.equal(query.resultType, 'documentsAndVoteTally')
+        if (mode === 'error') throw new Error('Document proof invalid')
+        return {
+          contenders: mode === 'empty' ? [] : [{ serializedDocument: new Uint8Array([3]), free () {} }],
+          winner: mode === 'pending' ? undefined : { identityId: mode === 'won' ? new m.Identifier(fixture.identifier) : undefined, free () {} },
+          free () { frees++ }
+        }
+      }
+    }
+    const alias = { alias: 'BoI.dash', timestamp: 1700000000000, tx: 'abc' }
+    for (const [next, expected] of [['pending', 'pending'], ['won', 'ok'], ['locked', 'locked'], ['empty', 'unknown']]) {
+      mode = next
+      const info = await readAliasInfo(sdk, alias.alias)
+      const result = getAliasStateByVote(info, alias, fixture.identifier)
+      assert.equal(result.status, expected)
+      assert.equal(result.alias, alias.alias)
+      assert.equal(result.contested, true)
+      assert.equal(result.txHash, alias.tx)
+      assert.equal(result.timestamp.getTime(), alias.timestamp)
+    }
+    assert.equal(frees, 4)
+    const unContested = await readAliasInfo(sdk, 'long-label-012345678901234567890.dash')
+    assert.equal(getAliasStateByVote(unContested, { alias: 'long-label-012345678901234567890.dash' }, fixture.identifier).contested, false)
+    assert.equal(calls, 4)
+    mode = 'error'
+    await assert.rejects(readAliasInfo(sdk, alias.alias), /Document proof invalid/)
+  })
+
   it('preserves all 19 actual keys, legacy fields and the budget/expiry key without truncation', async () => {
     const m = await import('@dashevo/wasm-sdk')
     await m.default()
@@ -75,7 +125,8 @@ describe('verified protocol-14 identity reads', () => {
     const first = await reader(fixture.identifier)
     assert.equal(first.publicKeys.length, 19)
     assert.equal(first.identityInfo.balance, 9007199254740999n)
-    assert.equal(first.nonce, 9007199254740997n)
+    assert.equal(first.nonce, 5n) // Legacy API exposes only the stored nonce's low40bits.
+    assert.equal(BigInt(fixture.nonce) & 0xFFFFFFFFFFn, 35n)
     await reader(fixture.identifier)
     assert.equal(fetches, 1)
     now += 60001
