@@ -1,0 +1,13 @@
+{
+  "height": 7386,
+  "transactionIndex": 0,
+  "txBase64": "AgGymURL4pyhBVcGjwMpzRMO0OaICoc9SvsW3XQk4L82swEAAAACbDUoIkoIKkKd3Ex39uFCpq0xvxPGqaR5UPq/9zV0xD0GBmRvbWFpbuZoxlmvZq7h5ywYbd57W34KHXEqCcQNVyH2Ir9TxTFVAAA+rlN70NKCLpqvyG5KRXLerG1CFVLvAUNz7o+5X6YsewcFbGFiZWwSPnFhLWtra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tray0yD25vcm1hbGl6ZWRMYWJlbBI+cWEta2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2trLTIabm9ybWFsaXplZFBhcmVudERvbWFpbk5hbWUSBGRhc2gQcGFyZW50RG9tYWluTmFtZRIEZGFzaAxwcmVvcmRlclNhbHQMrRW0vq1bvpC0JSQUSFloQ4XIk/UeviHTy0w8vx3tWtcHcmVjb3JkcxYBEghpZGVudGl0eRCymURL4pyhBVcGjwMpzRMO0OaICoc9SvsW3XQk4L82sw5zdWJkb21haW5SdWxlcxYBEg9hbGxvd1N1YmRvbWFpbnMTAAAAAUEfIwnJSPJIX1coAISf6WjYxOQ2vRm56C7PN6b7hFpbclJb8iNIEL5Vk08jAQ6hev4k40aIcQgHk1uk7bhakzdmLw==",
+  "txSha256": "1B017603A6DB6FE646E8B83F6E7A6EB3291359B8C094BA5DCFB2D82576CF84B9",
+  "result": {
+    "gas_used": 46045780
+  },
+  "expectedLabel": "qa-kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk-2",
+  "expectedParentDomainName": "dash",
+  "expectedIdentityIdentifier": "D2B7y66zhj5V6JPnNr4TbV3ak9xxajxtP586S5L5sTtE",
+  "expectedAlias": "qa-kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk-2.dash"
+}
